@@ -1,0 +1,7 @@
+spring:
+  datasource:
+    url: ${JDBC_URL:jdbc:postgresql://localhost:5432/iview}
+    username: ${JDBC_USERNAME:iview}
+    password: ${JDBC_PASSWORD}
+  flyway:
+    enabled: true

@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="iView 工业数据与可视化平台" />
+    <title>iView · 工业数据平台</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">iV</span>
+          <div><strong>iView</strong><small>工业数据平台</small></div>
+        </div>
+
+        <nav class="nav-list">
+          <button class="nav-item active" data-view="overview"><span>01</span>运行总览</button>
+          <button class="nav-item" data-view="devices"><span>02</span>设备中心</button>
+          <button class="nav-item" data-view="data"><span>03</span>数据与查询</button>
+          <button class="nav-item" data-view="dashboard"><span>04</span>可视化看板</button>
+          <button class="nav-item" data-view="migration"><span>05</span>融合进度</button>
+        </nav>
+
+        <div class="sidebar-foot">
+          <span class="pulse-dot"></span>
+          <div><strong id="backend-label">正在检测后端</strong><small>JVM · Spring Boot</small></div>
+        </div>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">IVIEW / CONTROL CENTER</p>
+            <h1 id="page-title">运行总览</h1>
+          </div>
+          <div class="top-actions">
+            <span class="time" id="clock">--:--:--</span>
+            <button class="outline-button" id="refresh-button">刷新状态</button>
+            <div class="avatar" aria-label="当前用户">管</div>
+          </div>
+        </header>
+
+        <section class="view active" data-panel="overview">
+          <div class="notice">
+            <div>
+              <strong>当前是 iView 第一阶段前端工作台</strong>
+              <p>页面连接真实工程状态；设备和生产指标为界面演示数据，不代表协议功能已经迁移完成。</p>
+            </div>
+            <span class="status-chip warn">基础建设中</span>
+          </div>
+
+          <div class="metric-grid">
+            <article class="metric-card accent-cyan">
+              <div class="metric-label"><span>后端状态</span><b id="backend-state">检测中</b></div>
+              <strong id="backend-value">--</strong>
+              <p>Spring Boot 服务</p>
+            </article>
+            <article class="metric-card accent-green">
+              <div class="metric-label"><span>平均稼动率</span><b>演示</b></div>
+              <strong>78.4<em>%</em></strong>
+              <p>较昨日 +2.6%</p>
+            </article>
+            <article class="metric-card accent-amber">
+              <div class="metric-label"><span>在线设备</span><b>演示</b></div>
+              <strong>42<em>/48</em></strong>
+              <p>3 台待机 · 3 台离线</p>
+            </article>
+            <article class="metric-card accent-violet">
+              <div class="metric-label"><span>今日产量</span><b>演示</b></div>
+              <strong>12,680</strong>
+              <p>计划完成度 83.7%</p>
+            </article>
+          </div>
+
+          <div class="overview-grid">
+            <article class="panel production-panel">
+              <div class="panel-head"><div><p class="eyebrow">OEE TREND</p><h2>稼动率趋势</h2></div><span class="status-chip">今日</span></div>
+              <div class="chart" aria-label="稼动率趋势演示图">
+                <div class="y-axis"><span>100%</span><span>75%</span><span>50%</span><span>25%</span><span>0%</span></div>
+                <div class="plot">
+                  <div class="grid-lines"></div>
+                  <svg viewBox="0 0 720 220" role="img" aria-label="稼动率折线">
+                    <defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#20d9e8" stop-opacity=".35"/><stop offset="1" stop-color="#20d9e8" stop-opacity="0"/></linearGradient></defs>
+                    <path class="area" d="M0 180 L90 148 L180 160 L270 105 L360 118 L450 78 L540 92 L630 56 L720 68 L720 220 L0 220Z"/>
+                    <path class="line" d="M0 180 L90 148 L180 160 L270 105 L360 118 L450 78 L540 92 L630 56 L720 68"/>
+                  </svg>
+                  <div class="x-axis"><span>08:00</span><span>10:00</span><span>12:00</span><span>14:00</span><span>16:00</span></div>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel state-panel">
+              <div class="panel-head"><div><p class="eyebrow">DEVICE STATE</p><h2>设备状态</h2></div></div>
+              <div class="donut-row">
+                <div class="donut"><div><strong>48</strong><span>设备总数</span></div></div>
+                <ul class="legend">
+                  <li><i class="green"></i><span>运行</span><strong>34</strong></li>
+                  <li><i class="amber"></i><span>待机</span><strong>8</strong></li>
+                  <li><i class="red"></i><span>离线</span><strong>3</strong></li>
+                  <li><i class="violet"></i><span>故障</span><strong>3</strong></li>
+                </ul>
+              </div>
+            </article>
+          </div>
+
+          <article class="panel device-table-panel">
+            <div class="panel-head"><div><p class="eyebrow">LIVE DEVICES</p><h2>关键设备</h2></div><button class="text-button" data-jump="devices">进入设备中心 →</button></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>设备</th><th>协议</th><th>当前状态</th><th>稼动率</th><th>最后采集</th></tr></thead>
+                <tbody>
+                  <tr><td><strong>CNC-01</strong><small>一车间 · A线</small></td><td>FANUC FOCAS</td><td><span class="live-state running">运行</span></td><td>86.2%</td><td>2 秒前</td></tr>
+                  <tr><td><strong>PLC-07</strong><small>装配车间 · B线</small></td><td>Siemens S7</td><td><span class="live-state idle">待机</span></td><td>72.8%</td><td>4 秒前</td></tr>
+                  <tr><td><strong>ROBOT-12</strong><small>焊接车间 · C线</small></td><td>Modbus TCP</td><td><span class="live-state fault">故障</span></td><td>41.5%</td><td>18 秒前</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="view" data-panel="devices">
+          <div class="section-heading">
+            <div><p class="eyebrow">DEVICE MANAGEMENT</p><h2>设备中心</h2><p>设备、分组和协议模板已接入 iView 数据库。</p></div>
+            <div class="button-row">
+              <button class="outline-button" data-dialog="group-dialog">新建设备组</button>
+              <button class="outline-button" data-dialog="template-dialog">新建模板</button>
+              <button class="primary-button" data-dialog="device-dialog">新增设备</button>
+            </div>
+          </div>
+          <div class="catalog-toolbar">
+            <label><span>搜索设备</span><input id="device-search" type="search" placeholder="设备名称或SN" /></label>
+            <button class="outline-button" id="device-refresh">刷新</button>
+            <span class="catalog-state" id="catalog-state">正在连接设备目录…</span>
+          </div>
+          <div class="catalog-grid">
+            <article class="panel catalog-main">
+              <div class="panel-head"><div><p class="eyebrow">DEVICE CATALOG</p><h2>设备列表</h2></div><span class="status-chip" id="device-count">0 台</span></div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>设备</th><th>模板 / 协议</th><th>分组</th><th>状态</th><th>操作</th></tr></thead>
+                  <tbody id="device-list"><tr><td colspan="5" class="empty-cell">正在读取设备…</td></tr></tbody>
+                </table>
+              </div>
+            </article>
+            <article class="panel catalog-side">
+              <div class="panel-head"><div><p class="eyebrow">PROTOCOL TEMPLATES</p><h2>设备模板</h2></div><span class="status-chip" id="template-count">0 个</span></div>
+              <div id="template-list" class="template-list"><p class="loading">正在读取模板…</p></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" data-panel="data">
+          <div class="section-heading"><div><p class="eyebrow">DATA WORKBENCH</p><h2>数据与查询</h2><p>数据源、数据集、SQL筛选和工业指标的统一查询入口。</p></div></div>
+          <div class="module-placeholder"><span>03</span><h3>查询契约已建立</h3><p>字段、过滤、排序、分页契约已经进入新工程；数据源适配器和执行引擎尚未迁移。</p><div class="tag-row"><b>查询 API · 进行中</b><b>数据源 · 未开始</b><b>查询执行 · 未开始</b></div></div>
+        </section>
+
+        <section class="view" data-panel="dashboard">
+          <div class="section-heading"><div><p class="eyebrow">VISUAL STUDIO</p><h2>可视化看板</h2><p>看板编辑、组件库、数据绑定、条件样式和发布运行时。</p></div></div>
+          <div class="module-placeholder"><span>04</span><h3>看板编辑器尚未迁移</h3><p>现有 Data Board 的组件和编辑能力已列入完整性台账，但还没有复制或改造进 iView。</p><div class="tag-row"><b>画布 · 未开始</b><b>组件库 · 未开始</b><b>数据绑定 · 未开始</b></div></div>
+        </section>
+
+        <section class="view" data-panel="migration">
+          <div class="section-heading"><div><p class="eyebrow">PARITY LEDGER</p><h2>融合进度</h2><p>数据直接读取工程功能台账；只有通过对照验收的能力才算完成。</p></div><button class="outline-button" id="parity-refresh">重新读取</button></div>
+          <div class="parity-metrics">
+            <article><span>总能力项</span><strong id="parity-total">--</strong></article>
+            <article><span>进行中</span><strong id="parity-progress">--</strong></article>
+            <article><span>已验收</span><strong id="parity-verified">--</strong></article>
+            <article><span>未开始</span><strong id="parity-pending">--</strong></article>
+          </div>
+          <article class="panel parity-panel">
+            <div class="progress-track"><div id="progress-bar"></div></div>
+            <div id="parity-list" class="parity-list"><p class="loading">正在读取功能台账…</p></div>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="group-dialog" class="form-dialog">
+      <form method="dialog" data-form="group">
+        <div class="dialog-head"><div><p class="eyebrow">DEVICE GROUP</p><h2>新建设备组</h2></div><button type="button" data-close-dialog aria-label="关闭">×</button></div>
+        <label>设备组编码<input name="group_code" required pattern="[A-Za-z0-9_-]{1,50}" placeholder="line-a" /></label>
+        <label>设备组名称<input name="group_name" required placeholder="一车间A线" /></label>
+        <label>说明<textarea name="description" rows="3"></textarea></label>
+        <p class="form-error" role="alert"></p>
+        <div class="dialog-actions"><button type="button" data-close-dialog class="outline-button">取消</button><button type="submit" class="primary-button">保存设备组</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="template-dialog" class="form-dialog">
+      <form method="dialog" data-form="template">
+        <div class="dialog-head"><div><p class="eyebrow">PROTOCOL TEMPLATE</p><h2>新建设备模板</h2></div><button type="button" data-close-dialog aria-label="关闭">×</button></div>
+        <div class="form-grid"><label>模板标识<input name="template_code" required pattern="[A-Za-z0-9_]{1,32}" placeholder="modbus_cnc" /></label><label>模板名称<input name="template_name" required placeholder="Modbus CNC" /></label></div>
+        <label>协议类型<select name="protocol_type"><option value="modbus_tcp">Modbus TCP</option><option value="modbus_rtu">Modbus RTU</option><option value="s7comm">Siemens S7</option><option value="opcua">OPC UA</option><option value="mits_mc_3e">Mitsubishi MC 3E</option></select></label>
+        <div class="form-grid"><label>采集间隔(ms)<input name="collect_interval" type="number" min="10" value="1000" /></label><label>超时(ms)<input name="timeout" type="number" min="100" value="5000" /></label></div>
+        <label>说明<textarea name="description" rows="3"></textarea></label>
+        <p class="form-error" role="alert"></p>
+        <div class="dialog-actions"><button type="button" data-close-dialog class="outline-button">取消</button><button type="submit" class="primary-button">保存模板</button></div>
+      </form>
+    </dialog>
+
+    <dialog id="device-dialog" class="form-dialog">
+      <form method="dialog" data-form="device">
+        <div class="dialog-head"><div><p class="eyebrow">NEW DEVICE</p><h2>新增设备</h2></div><button type="button" data-close-dialog aria-label="关闭">×</button></div>
+        <div class="form-grid"><label>设备SN<input name="device_sn" required pattern="[A-Za-z0-9_-]{1,32}" placeholder="CNC_001" /></label><label>设备名称<input name="device_name" required placeholder="一号加工中心" /></label></div>
+        <div class="form-grid"><label>设备模板<select name="template_id" id="device-template" required></select></label><label>设备组<select name="group_id" id="device-group"><option value="">不分组</option></select></label></div>
+        <div class="form-grid"><label>设备地址<input name="host" placeholder="192.168.1.20" /></label><label>端口<input name="port" type="number" min="1" max="65535" value="502" /></label></div>
+        <label>说明<textarea name="description" rows="3"></textarea></label>
+        <p class="form-error" role="alert"></p>
+        <div class="dialog-actions"><button type="button" data-close-dialog class="outline-button">取消</button><button type="submit" class="primary-button">创建设备</button></div>
+      </form>
+    </dialog>
+    <dialog id="diagnostic-dialog" class="form-dialog">
+      <div class="diagnostic-body">
+        <div class="dialog-head"><div><p class="eyebrow">DEVICE DIAGNOSIS</p><h2 id="diagnostic-title">设备诊断</h2></div><button type="button" data-close-dialog aria-label="关闭">×</button></div>
+        <div id="diagnostic-summary" class="diagnostic-summary"><p class="loading">正在检查设备配置和网络连接…</p></div>
+        <div id="diagnostic-steps" class="diagnostic-steps"></div>
+        <div class="dialog-actions"><button type="button" data-close-dialog class="outline-button">关闭</button></div>
+      </div>
+    </dialog>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
