@@ -46,6 +46,14 @@ data class DeviceRealtimeView(
     val points: List<RealtimePointView>,
 )
 
+data class DeviceStatisticsView(
+    val total: Long,
+    val enabled: Long,
+    val online: Long,
+    val offline: Long,
+    val sessionCount: Int,
+)
+
 class DeviceCollectionService(
     private val catalog: DeviceCatalogService,
     private val runtimeMapper: DeviceRuntimeMapper,
@@ -88,6 +96,23 @@ class DeviceCollectionService(
             val point = pointById[value.pointId.value]
             pointView(value, point?.pointName ?: value.pointId.value.toString(), point?.pointCode ?: "")
         }
+    }
+
+    fun statistics(sessionCount: Int): DeviceStatisticsView {
+        var page = 1
+        var total = 0L
+        var enabled = 0L
+        var online = 0L
+        do {
+            val result = catalog.listDevices(DeviceFilter(page, 100))
+            total = result.total
+            result.list.forEach { device ->
+                if (device.enabled) enabled++
+                if (realtime(device.id).isOnline) online++
+            }
+            page++
+        } while ((page - 1) * 100 < result.total)
+        return DeviceStatisticsView(total, enabled, online, total - online, sessionCount)
     }
 
     suspend fun collectDueDevices(now: Instant = Instant.now()): Int {

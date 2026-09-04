@@ -56,6 +56,32 @@ class DeviceCatalogService(private val repository: DeviceCatalogRepository) {
         if (!repository.deletePoint(id)) throw CatalogNotFoundException("采集点不存在: $id")
     }
 
+    fun listControlPoints(templateId: Long): List<TemplateControlPoint> {
+        getTemplate(templateId)
+        return repository.listControlPoints(templateId)
+    }
+    fun getControlPoint(id: Long) = repository.findControlPoint(id)
+        ?: throw CatalogNotFoundException("控制点不存在: $id")
+    fun createControlPoint(templateId: Long, command: TemplateControlPointCommand): TemplateControlPoint {
+        getTemplate(templateId)
+        validateControlPoint(command)
+        if (repository.controlPointCodeExists(templateId, command.code)) throw CatalogConflictException("控制点编码已存在")
+        return repository.createControlPoint(templateId, command.normalized())
+    }
+    fun updateControlPoint(id: Long, command: TemplateControlPointCommand): TemplateControlPoint {
+        val current = repository.findControlPoint(id) ?: throw CatalogNotFoundException("控制点不存在: $id")
+        validateControlPoint(command)
+        if (repository.controlPointCodeExists(current.templateId, command.code, id)) throw CatalogConflictException("控制点编码已存在")
+        return repository.updateControlPoint(id, command.normalized()) ?: throw CatalogNotFoundException("控制点不存在: $id")
+    }
+    fun deleteControlPoint(id: Long) {
+        if (!repository.deleteControlPoint(id)) throw CatalogNotFoundException("控制点不存在: $id")
+    }
+    fun appendControlLog(command: ControlLogCommand) = repository.appendControlLog(command)
+    fun listControlLogs(filter: ControlLogFilter) = repository.listControlLogs(
+        filter.copy(page = validPage(filter.page), pageSize = validPageSize(filter.pageSize))
+    )
+
     fun listDevices(filter: DeviceFilter) = repository.listDevices(
         filter.copy(page = validPage(filter.page), pageSize = validPageSize(filter.pageSize), keyword = filter.keyword?.trim())
     )
@@ -98,6 +124,13 @@ class DeviceCatalogService(private val repository: DeviceCatalogRepository) {
         requireText(command.dataType, 30, "数据类型")
         if (command.address.isBlank() && command.pointConfig.isEmpty()) throw CatalogValidationException("采集点地址和协议配置不能同时为空")
     }
+    private fun validateControlPoint(command: TemplateControlPointCommand) {
+        requireText(command.name, 100, "控制点名称")
+        requireMatch(command.code, POINT_CODE, "控制点编码只能包含字母、数字、下划线、点和横杆")
+        requireText(command.dataType, 30, "数据类型")
+        if (command.address.isBlank() && command.pointConfig.isEmpty()) throw CatalogValidationException("控制点地址和协议配置不能同时为空")
+        if (command.valueRange.length > 200) throw CatalogValidationException("控制点值范围不能超过200位")
+    }
     private fun validateDevice(command: DeviceCommand) {
         requireMatch(command.sn, DEVICE_SN, "设备SN只能包含字母、数字、下划线和横杆，且不超过32位")
         requireText(command.name, 100, "设备名称")
@@ -118,6 +151,7 @@ class DeviceCatalogService(private val repository: DeviceCatalogRepository) {
     private fun GroupCommand.normalized() = copy(code = code.trim(), name = name.trim(), description = description.trim())
     private fun TemplateCommand.normalized() = copy(code = code.trim(), name = name.trim(), protocolType = protocolType.trim().lowercase(), description = description.trim())
     private fun TemplatePointCommand.normalized() = copy(name = name.trim(), code = code.trim(), dataType = dataType.trim().lowercase(), address = address.trim(), unit = unit.trim(), description = description.trim())
+    private fun TemplateControlPointCommand.normalized() = copy(name = name.trim(), code = code.trim(), dataType = dataType.trim().lowercase(), address = address.trim(), defaultValue = defaultValue.trim(), valueRange = valueRange.trim(), description = description.trim())
     private fun DeviceCommand.normalized() = copy(sn = sn.trim(), name = name.trim(), lineId = lineId?.trim(), vendor = vendor?.trim(), deviceType = deviceType?.trim(), description = description.trim())
     private fun Device.toCommand() = DeviceCommand(deviceSn, deviceName, templateId, groupId, lineId, deviceVendor, deviceType, configJson, enabled, description)
 

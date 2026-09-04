@@ -7,3 +7,9 @@ out/
 *.log
 .env
 application-local.yaml
+
+# Local runtime databases
+data/
+apps/server/data/
+*.mv.db
+*.lock.db

@@ -5,3 +5,7 @@ spring:
     password: ${JDBC_PASSWORD}
   flyway:
     enabled: true
+
+iview:
+  data-source:
+    secret: ${IVIEW_DATASOURCE_SECRET}

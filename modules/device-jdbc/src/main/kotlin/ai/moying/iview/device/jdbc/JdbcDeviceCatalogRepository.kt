@@ -1,6 +1,9 @@
 package ai.moying.iview.device.jdbc
 
 import ai.moying.iview.device.Device
+import ai.moying.iview.device.ControlLog
+import ai.moying.iview.device.ControlLogCommand
+import ai.moying.iview.device.ControlLogFilter
 import ai.moying.iview.device.DeviceCatalogRepository
 import ai.moying.iview.device.DeviceCommand
 import ai.moying.iview.device.DeviceFilter
@@ -9,6 +12,8 @@ import ai.moying.iview.device.DeviceTemplate
 import ai.moying.iview.device.GroupCommand
 import ai.moying.iview.device.Page
 import ai.moying.iview.device.TemplateCommand
+import ai.moying.iview.device.TemplateControlPoint
+import ai.moying.iview.device.TemplateControlPointCommand
 import ai.moying.iview.device.TemplatePoint
 import ai.moying.iview.device.TemplatePointCommand
 import com.fasterxml.jackson.core.type.TypeReference
@@ -29,6 +34,8 @@ class JdbcDeviceCatalogRepository(
     private val groupInsert by lazy { insert("iview_device_group", "group_code", "group_name", "description") }
     private val templateInsert by lazy { insert("iview_device_template", "template_code", "template_name", "protocol_type", "protocol_config", "collect_interval_ms", "timeout_ms", "description") }
     private val pointInsert by lazy { insert("iview_template_point", "template_id", "point_name", "point_code", "data_type", "address", "unit", "enabled", "value_enum", "point_config", "description") }
+    private val controlPointInsert by lazy { insert("iview_template_control_point", "template_id", "point_name", "point_code", "data_type", "address", "default_value", "value_range", "enabled", "value_enum", "point_config", "description") }
+    private val controlLogInsert by lazy { insert("iview_control_log", "device_id", "device_name", "control_point_id", "point_name", "control_value", "status", "message", "operator_id", "operator_name", "source") }
     private val deviceInsert by lazy { insert("iview_device", "device_sn", "device_name", "template_id", "group_id", "line_id", "device_vendor", "device_type", "config_json", "enabled", "description") }
 
     override fun listGroups(): List<DeviceGroup> = jdbc.query(
@@ -175,6 +182,85 @@ class JdbcDeviceCatalogRepository(
         "DELETE FROM iview_template_point WHERE id=:id", mapOf("id" to id)
     ) > 0
 
+    override fun listControlPoints(templateId: Long): List<TemplateControlPoint> = jdbc.query(
+        "SELECT * FROM iview_template_control_point WHERE template_id=:templateId ORDER BY id",
+        mapOf("templateId" to templateId), controlPointMapper,
+    )
+
+    override fun findControlPoint(id: Long): TemplateControlPoint? = single(
+        "SELECT * FROM iview_template_control_point WHERE id=:id", mapOf("id" to id), controlPointMapper,
+    )
+
+    override fun controlPointCodeExists(templateId: Long, code: String, excludingId: Long?): Boolean {
+        val sql = buildString {
+            append("SELECT COUNT(*) FROM iview_template_control_point WHERE template_id=:templateId AND point_code=:code")
+            if (excludingId != null) append(" AND id<>:excludingId")
+        }
+        return count(sql, mapOf("templateId" to templateId, "code" to code, "excludingId" to excludingId)) > 0
+    }
+
+    override fun createControlPoint(templateId: Long, command: TemplateControlPointCommand): TemplateControlPoint {
+        val id = controlPointInsert.executeAndReturnKey(
+            mapOf(
+                "template_id" to templateId, "point_name" to command.name, "point_code" to command.code,
+                "data_type" to command.dataType, "address" to command.address,
+                "default_value" to command.defaultValue, "value_range" to command.valueRange,
+                "enabled" to command.enabled, "value_enum" to json(command.valueEnum),
+                "point_config" to json(command.pointConfig), "description" to command.description,
+            )
+        ).toLong()
+        return requireNotNull(findControlPoint(id))
+    }
+
+    override fun updateControlPoint(id: Long, command: TemplateControlPointCommand): TemplateControlPoint? {
+        val count = jdbc.update(
+            """UPDATE iview_template_control_point SET point_name=:name, point_code=:code,
+               data_type=:dataType, address=:address, default_value=:defaultValue,
+               value_range=:valueRange, enabled=:enabled, value_enum=:valueEnum,
+               point_config=:pointConfig, description=:description,
+               updated_at=CURRENT_TIMESTAMP WHERE id=:id""",
+            mapOf(
+                "id" to id, "name" to command.name, "code" to command.code, "dataType" to command.dataType,
+                "address" to command.address, "defaultValue" to command.defaultValue,
+                "valueRange" to command.valueRange, "enabled" to command.enabled,
+                "valueEnum" to json(command.valueEnum), "pointConfig" to json(command.pointConfig),
+                "description" to command.description,
+            ),
+        )
+        return if (count == 0) null else findControlPoint(id)
+    }
+
+    override fun deleteControlPoint(id: Long) = jdbc.update(
+        "DELETE FROM iview_template_control_point WHERE id=:id", mapOf("id" to id)
+    ) > 0
+
+    override fun appendControlLog(command: ControlLogCommand): ControlLog {
+        val id = controlLogInsert.executeAndReturnKey(
+            mapOf(
+                "device_id" to command.deviceId, "device_name" to command.deviceName,
+                "control_point_id" to command.controlPointId, "point_name" to command.pointName,
+                "control_value" to command.value, "status" to command.status, "message" to command.message,
+                "operator_id" to command.operatorId, "operator_name" to command.operatorName,
+                "source" to command.source,
+            )
+        ).toLong()
+        return requireNotNull(single("SELECT * FROM iview_control_log WHERE id=:id", mapOf("id" to id), controlLogMapper))
+    }
+
+    override fun listControlLogs(filter: ControlLogFilter): Page<ControlLog> {
+        val clauses = mutableListOf<String>()
+        val params = mutableMapOf<String, Any>("limit" to filter.pageSize, "offset" to (filter.page - 1) * filter.pageSize)
+        filter.deviceId?.let { clauses += "device_id=:deviceId"; params["deviceId"] = it }
+        filter.controlPointId?.let { clauses += "control_point_id=:controlPointId"; params["controlPointId"] = it }
+        val where = if (clauses.isEmpty()) "" else "WHERE ${clauses.joinToString(" AND ")}"
+        val total = count("SELECT COUNT(*) FROM iview_control_log $where", params)
+        val list = jdbc.query(
+            "SELECT * FROM iview_control_log $where ORDER BY id DESC LIMIT :limit OFFSET :offset",
+            params, controlLogMapper,
+        )
+        return Page(list, total, filter.page, filter.pageSize)
+    }
+
     override fun listDevices(filter: DeviceFilter): Page<Device> {
         val clauses = mutableListOf<String>()
         val params = mutableMapOf<String, Any>("limit" to filter.pageSize, "offset" to (filter.page - 1) * filter.pageSize)
@@ -270,6 +356,23 @@ class JdbcDeviceCatalogRepository(
             rs.getString("data_type"), rs.getString("address"), rs.getString("unit"), rs.getBoolean("enabled"),
             listJson(rs.getString("value_enum")), mapJson(rs.getString("point_config")), rs.getString("description"),
             instant(rs, "created_at"), instant(rs, "updated_at"),
+        )
+    }
+    private val controlPointMapper = RowMapper { rs, _ ->
+        TemplateControlPoint(
+            rs.getLong("id"), rs.getLong("template_id"), rs.getString("point_name"), rs.getString("point_code"),
+            rs.getString("data_type"), rs.getString("address"), rs.getString("default_value"),
+            rs.getString("value_range"), rs.getBoolean("enabled"), listJson(rs.getString("value_enum")),
+            mapJson(rs.getString("point_config")), rs.getString("description"),
+            instant(rs, "created_at"), instant(rs, "updated_at"),
+        )
+    }
+    private val controlLogMapper = RowMapper { rs, _ ->
+        ControlLog(
+            rs.getLong("id"), rs.getLong("device_id"), rs.getString("device_name"),
+            rs.getLong("control_point_id"), rs.getString("point_name"), rs.getString("control_value"),
+            rs.getInt("status"), rs.getString("message"), rs.getLong("operator_id"),
+            rs.getString("operator_name"), rs.getString("source"), instant(rs, "created_at"),
         )
     }
     private val deviceMapper = RowMapper { rs, _ ->

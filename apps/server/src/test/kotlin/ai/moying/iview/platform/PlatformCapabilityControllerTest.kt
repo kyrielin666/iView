@@ -8,9 +8,12 @@ class PlatformCapabilityControllerTest {
     @Test
     fun `reports JVM foundation capabilities`() {
         val response = PlatformCapabilityController().capabilities()
-        assertEquals("iView", response.product)
-        assertEquals("JVM", response.runtime)
-        assertTrue(response.capabilities.any { it.name == "protocol-spi" })
-        assertTrue(response.capabilities.any { it.name == "modbus-tcp" && it.status == "in-progress" })
+        assertEquals("200", response.code)
+        assertEquals("iView", response.data?.product)
+        assertEquals("JVM", response.data?.runtime)
+        assertTrue(response.data?.capabilities?.any { it.name == "protocol-spi" } == true)
+        assertTrue(response.data?.capabilities?.any { it.name == "modbus-tcp" && it.status == "in-progress" } == true)
+        assertTrue(response.data?.frontendCapabilities?.any { it.name == "看板文档编辑" && it.scope == "frontend" } == true)
+        assertEquals(32, response.data?.ledger?.inProgress)
     }
 }

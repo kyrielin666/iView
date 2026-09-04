@@ -47,6 +47,38 @@ data class TemplatePoint(
     val updatedAt: Instant,
 )
 
+data class TemplateControlPoint(
+    val id: Long,
+    val templateId: Long,
+    val pointName: String,
+    val pointCode: String,
+    val dataType: String,
+    val address: String,
+    val defaultValue: String,
+    val valueRange: String,
+    val enabled: Boolean,
+    val valueEnum: List<Map<String, Any?>>,
+    val pointConfig: Map<String, Any?>,
+    val description: String,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)
+
+data class ControlLog(
+    val id: Long,
+    val deviceId: Long,
+    val deviceName: String,
+    val controlPointId: Long,
+    val pointName: String,
+    val value: String,
+    val status: Int,
+    val message: String,
+    val operatorId: Long,
+    val operatorName: String,
+    val source: String,
+    val createdAt: Instant,
+)
+
 data class Device(
     val id: Long,
     val deviceSn: String,
@@ -85,6 +117,39 @@ data class TemplatePointCommand(
     val valueEnum: List<Map<String, Any?>> = emptyList(),
     val pointConfig: Map<String, Any?> = emptyMap(),
     val description: String = "",
+)
+
+data class TemplateControlPointCommand(
+    val name: String,
+    val code: String,
+    val dataType: String,
+    val address: String,
+    val defaultValue: String = "",
+    val valueRange: String = "",
+    val enabled: Boolean = true,
+    val valueEnum: List<Map<String, Any?>> = emptyList(),
+    val pointConfig: Map<String, Any?> = emptyMap(),
+    val description: String = "",
+)
+
+data class ControlLogCommand(
+    val deviceId: Long,
+    val deviceName: String,
+    val controlPointId: Long,
+    val pointName: String,
+    val value: String,
+    val status: Int,
+    val message: String,
+    val operatorId: Long = 0,
+    val operatorName: String = "system",
+    val source: String = "web",
+)
+
+data class ControlLogFilter(
+    val page: Int = 1,
+    val pageSize: Int = 20,
+    val deviceId: Long? = null,
+    val controlPointId: Long? = null,
 )
 
 data class DeviceCommand(
@@ -131,6 +196,16 @@ interface DeviceCatalogRepository {
     fun createPoint(templateId: Long, command: TemplatePointCommand): TemplatePoint
     fun updatePoint(id: Long, command: TemplatePointCommand): TemplatePoint?
     fun deletePoint(id: Long): Boolean
+
+    fun listControlPoints(templateId: Long): List<TemplateControlPoint>
+    fun findControlPoint(id: Long): TemplateControlPoint?
+    fun controlPointCodeExists(templateId: Long, code: String, excludingId: Long? = null): Boolean
+    fun createControlPoint(templateId: Long, command: TemplateControlPointCommand): TemplateControlPoint
+    fun updateControlPoint(id: Long, command: TemplateControlPointCommand): TemplateControlPoint?
+    fun deleteControlPoint(id: Long): Boolean
+
+    fun appendControlLog(command: ControlLogCommand): ControlLog
+    fun listControlLogs(filter: ControlLogFilter): Page<ControlLog>
 
     fun listDevices(filter: DeviceFilter): Page<Device>
     fun findDevice(id: Long): Device?

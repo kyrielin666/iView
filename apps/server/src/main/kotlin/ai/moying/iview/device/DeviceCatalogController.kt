@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.time.Instant
 import kotlinx.coroutines.runBlocking
+import ai.moying.iview.collector.DeviceSessionPool
 
 class GroupRequest {
     var groupCode: String = ""
@@ -41,6 +42,25 @@ class PointRequest {
     var valueEnum: List<Map<String, Any?>> = emptyList()
     var pointConfig: Map<String, Any?> = emptyMap()
     var description: String = ""
+}
+
+class ControlPointRequest {
+    var templateId: Long = 0
+    var pointName: String = ""
+    var pointCode: String = ""
+    var dataType: String = "int16"
+    var address: String = ""
+    var defaultValue: String = ""
+    var valueRange: String = ""
+    var enabled: Int = 1
+    var valueEnum: List<Map<String, Any?>> = emptyList()
+    var pointConfig: Map<String, Any?> = emptyMap()
+    var description: String = ""
+}
+
+class ExecuteControlRequest {
+    var deviceId: Long = 0
+    var value: Any? = null
 }
 
 class DeviceRequest {
@@ -82,6 +102,24 @@ data class TemplateView(
     val timeout: Int,
     val description: String,
     val points: List<PointView>,
+    val controlPoints: List<ControlPointView>,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)
+
+data class ControlPointView(
+    val id: Long,
+    val templateId: Long,
+    val pointName: String,
+    val pointCode: String,
+    val dataType: String,
+    val address: String,
+    val defaultValue: String,
+    val valueRange: String,
+    val enabled: Int,
+    val valueEnum: List<Map<String, Any?>>,
+    val pointConfig: Map<String, Any?>,
+    val description: String,
     val createdAt: Instant,
     val updatedAt: Instant,
 )
@@ -148,12 +186,15 @@ class DeviceTemplateController(private val service: DeviceCatalogService) {
     @PutMapping("/{id}") fun update(@PathVariable id: Long, @RequestBody request: TemplateRequest) = ApiResponse.success(view(service.updateTemplate(id, request.command())))
     @DeleteMapping("/{id}") fun delete(@PathVariable id: Long): ApiResponse<Nothing> { service.deleteTemplate(id); return ApiResponse.success() }
     @GetMapping("/{id}/points") fun points(@PathVariable id: Long) = ApiResponse.success(service.listPoints(id).map(::pointView))
+    @GetMapping("/{id}/control-points") fun controlPoints(@PathVariable id: Long) =
+        ApiResponse.success(service.listControlPoints(id).map(::controlPointView))
     @PostMapping("/{id}/points") @ResponseStatus(HttpStatus.CREATED)
     fun createPoint(@PathVariable id: Long, @RequestBody request: PointRequest) = ApiResponse.success(pointView(service.createPoint(id, request.command())))
 
     private fun view(template: DeviceTemplate) = TemplateView(
         template.id, template.templateCode, template.templateName, template.protocolType, template.protocolConfig,
         template.collectIntervalMs, template.timeoutMs, template.description, service.listPoints(template.id).map(::pointView),
+        service.listControlPoints(template.id).map(::controlPointView),
         template.createdAt, template.updatedAt,
     )
     private fun TemplateRequest.command() = TemplateCommand(templateCode, templateName, protocolType, protocolCfg, collectInterval, timeout, description)
@@ -164,6 +205,62 @@ class DeviceTemplateController(private val service: DeviceCatalogService) {
 class TemplatePointController(private val service: DeviceCatalogService) {
     @PutMapping("/{id}") fun update(@PathVariable id: Long, @RequestBody request: PointRequest) = ApiResponse.success(pointView(service.updatePoint(id, request.command())))
     @DeleteMapping("/{id}") fun delete(@PathVariable id: Long): ApiResponse<Nothing> { service.deletePoint(id); return ApiResponse.success() }
+}
+
+@RestController
+@RequestMapping("/api/v1/control-points")
+class TemplateControlPointController(
+    private val service: DeviceCatalogService,
+    private val control: DeviceControlService,
+) {
+    @GetMapping("/{id}") fun get(@PathVariable id: Long) = ApiResponse.success(controlPointView(service.getControlPoint(id)))
+
+    @PostMapping @ResponseStatus(HttpStatus.CREATED)
+    fun create(@RequestBody request: ControlPointRequest): ApiResponse<ControlPointView> {
+        if (request.templateId <= 0) throw CatalogValidationException("template_id 必须大于0")
+        return ApiResponse.success(controlPointView(service.createControlPoint(request.templateId, request.command())))
+    }
+
+    @PutMapping("/{id}")
+    fun update(@PathVariable id: Long, @RequestBody request: ControlPointRequest) =
+        ApiResponse.success(controlPointView(service.updateControlPoint(id, request.command())))
+
+    @DeleteMapping("/{id}")
+    fun delete(@PathVariable id: Long): ApiResponse<Nothing> { service.deleteControlPoint(id); return ApiResponse.success() }
+
+    @DeleteMapping("/batch/{ids}")
+    fun batchDelete(@PathVariable ids: String): ApiResponse<Nothing> {
+        ids.split(',').map(String::trim).filter(String::isNotEmpty).map(String::toLong).forEach(service::deleteControlPoint)
+        return ApiResponse.success()
+    }
+
+    @PostMapping("/batch") @ResponseStatus(HttpStatus.CREATED)
+    fun batchCreate(@RequestBody requests: List<ControlPointRequest>): ApiResponse<List<ControlPointView>> {
+        if (requests.isEmpty()) throw CatalogValidationException("控制点不能为空")
+        return ApiResponse.success(requests.map { request ->
+            if (request.templateId <= 0) throw CatalogValidationException("template_id 必须大于0")
+            controlPointView(service.createControlPoint(request.templateId, request.command()))
+        })
+    }
+
+    @PostMapping("/{id}/execute")
+    fun execute(@PathVariable id: Long, @RequestBody request: ExecuteControlRequest): ApiResponse<ControlExecutionView> {
+        if (request.deviceId <= 0) throw CatalogValidationException("device_id 必须大于0")
+        if (request.value == null) throw CatalogValidationException("value 不能为空")
+        return ApiResponse.success(runBlocking { control.execute(id, request.deviceId, request.value) })
+    }
+}
+
+@RestController
+@RequestMapping("/api/v1/control-logs")
+class ControlLogController(private val service: DeviceCatalogService) {
+    @GetMapping
+    fun list(
+        @RequestParam(defaultValue = "1") page: Int,
+        @RequestParam(name = "page_size", defaultValue = "20") pageSize: Int,
+        @RequestParam(name = "device_id", required = false) deviceId: Long?,
+        @RequestParam(name = "control_point_id", required = false) controlPointId: Long?,
+    ) = ApiResponse.success(service.listControlLogs(ControlLogFilter(page, pageSize, deviceId, controlPointId)))
 }
 
 @RestController
@@ -201,7 +298,7 @@ class DeviceController(private val service: DeviceCatalogService) {
         val template = service.getTemplate(device.templateId)
         return DeviceView(
             device.id, device.deviceSn, device.deviceName, device.templateId,
-            TemplateView(template.id, template.templateCode, template.templateName, template.protocolType, template.protocolConfig, template.collectIntervalMs, template.timeoutMs, template.description, service.listPoints(template.id).map(::pointView), template.createdAt, template.updatedAt),
+            TemplateView(template.id, template.templateCode, template.templateName, template.protocolType, template.protocolConfig, template.collectIntervalMs, template.timeoutMs, template.description, service.listPoints(template.id).map(::pointView), service.listControlPoints(template.id).map(::controlPointView), template.createdAt, template.updatedAt),
             device.groupId, device.lineId, device.deviceVendor, device.deviceType, device.configJson,
             if (device.enabled) 1 else 0, false, device.description, device.createdAt, device.updatedAt,
         )
@@ -217,7 +314,11 @@ class DeviceController(private val service: DeviceCatalogService) {
 class DeviceProtocolController(
     private val diagnostics: DeviceDiagnosticsService,
     private val collection: DeviceCollectionService,
+    private val sessions: DeviceSessionPool,
 ) {
+    @GetMapping("/statistics")
+    fun statistics() = ApiResponse.success(collection.statistics(sessions.statuses().size))
+
     @PostMapping("/{id}/test")
     fun test(@PathVariable id: Long) = ApiResponse.success(runBlocking { diagnostics.test(id) })
 
@@ -247,8 +348,23 @@ class DeviceProtocolController(
     }
 }
 
+@RestController
+@RequestMapping("/api/v1/collector")
+class CollectorMonitorController(private val sessions: DeviceSessionPool) {
+    @GetMapping("/sessions")
+    fun sessions() = ApiResponse.success(sessions.statuses())
+}
+
 private fun PointRequest.command() = TemplatePointCommand(pointName, pointCode, dataType, address, unit, enabled != 0, valueEnum, pointConfig, description)
+private fun ControlPointRequest.command() = TemplateControlPointCommand(
+    pointName, pointCode, dataType, address, defaultValue, valueRange, enabled != 0, valueEnum, pointConfig, description,
+)
 private fun pointView(point: TemplatePoint) = PointView(
     point.id, point.templateId, point.pointName, point.pointCode, point.dataType, point.address, point.unit,
     if (point.enabled) 1 else 0, point.valueEnum, point.pointConfig, point.description, point.createdAt, point.updatedAt,
+)
+private fun controlPointView(point: TemplateControlPoint) = ControlPointView(
+    point.id, point.templateId, point.pointName, point.pointCode, point.dataType, point.address,
+    point.defaultValue, point.valueRange, if (point.enabled) 1 else 0, point.valueEnum,
+    point.pointConfig, point.description, point.createdAt, point.updatedAt,
 )

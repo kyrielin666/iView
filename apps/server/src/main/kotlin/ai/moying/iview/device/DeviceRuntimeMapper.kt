@@ -29,7 +29,7 @@ class DeviceRuntimeMapper(private val catalog: DeviceCatalogService) {
         val points = catalogPoints.map { point ->
             PointDefinition(
                 PointId(point.id), DeviceId(device.id), point.pointCode, point.pointName, point.address,
-                dataType(point.dataType), PointAccess.READ_ONLY, Duration.ofMillis(template.collectIntervalMs.toLong()),
+                mapDataType(point.dataType), PointAccess.READ_ONLY, Duration.ofMillis(template.collectIntervalMs.toLong()),
                 point.pointConfig.mapValues { it.value?.toString().orEmpty() },
             )
         }
@@ -45,7 +45,7 @@ class DeviceRuntimeMapper(private val catalog: DeviceCatalogService) {
         )
     }
 
-    private fun dataType(value: String): PointDataType = when (value.trim().lowercase()) {
+    fun mapDataType(value: String): PointDataType = when (value.trim().lowercase()) {
         "bool", "boolean" -> PointDataType.BOOLEAN
         "int16", "short" -> PointDataType.INT16
         "uint16", "ushort" -> PointDataType.UINT16
@@ -57,6 +57,6 @@ class DeviceRuntimeMapper(private val catalog: DeviceCatalogService) {
         "float64", "double" -> PointDataType.FLOAT64
         "string" -> PointDataType.STRING
         "bytes", "bytearray" -> PointDataType.BYTES
-        else -> throw CatalogValidationException("不支持的采集点数据类型: $value")
+        else -> throw CatalogValidationException("不支持的点位数据类型: $value")
     }
 }

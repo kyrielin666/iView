@@ -29,6 +29,12 @@ info:
     description: Industrial data and visualization platform
 
 iview:
+  cors:
+    # 逗号分隔的前端来源；留空即不开启跨域，开发期通过 iView-frontend/server.mjs 同源代理。
+    allowed-origins: ${IVIEW_CORS_ALLOWED_ORIGINS:}
+  data-source:
+    # 开发默认值；生产环境必须通过 IVIEW_DATASOURCE_SECRET 覆盖，且不得变更已有值。
+    secret: ${IVIEW_DATASOURCE_SECRET:iview-development-secret-change-me}
   collector:
     scheduling-enabled: false
     scan-delay-ms: 1000

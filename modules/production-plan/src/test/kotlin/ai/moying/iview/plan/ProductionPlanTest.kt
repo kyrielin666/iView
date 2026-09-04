@@ -1,0 +1,5 @@
+package ai.moying.iview.plan
+import java.time.*
+import kotlin.test.*
+class ProductionPlanTest{@Test fun `cross midnight shift subtracts device downtime`(){val r=Mem();r.s+=Shift(1,"夜班",20*60,8*60,setOf(DayOfWeek.MONDAY),"UTC",true,1);r.d+=PlannedDowntime(1,7,Instant.parse("2026-01-06T00:00:00Z"),Instant.parse("2026-01-06T01:00:00Z"),"保养",1);val d=ProductionPlanService(r).plannedDuration(7,Instant.parse("2026-01-05T20:00:00Z"),Instant.parse("2026-01-06T08:00:00Z"));assertEquals(Duration.ofHours(11),d)}}
+private class Mem:ProductionPlanRepository{val s=mutableListOf<Shift>();val d=mutableListOf<PlannedDowntime>();override fun shifts()=s;override fun shift(id:Long)=s.find{it.id==id};override fun createShift(c:ShiftCommand)=throw UnsupportedOperationException();override fun updateShift(id:Long,c:ShiftCommand)=null;override fun deleteShift(id:Long)=false;override fun downtime(deviceId:Long,start:Instant,end:Instant)=d.filter{it.deviceId==null||it.deviceId==deviceId};override fun createDowntime(c:PlannedDowntimeCommand)=throw UnsupportedOperationException();override fun deleteDowntime(id:Long)=false}

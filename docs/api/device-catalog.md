@@ -30,6 +30,23 @@ All responses use the compatibility envelope:
 Template and point protocol configuration is stored as JSON. Template deletion is blocked while a
 device references it; deleting an unused template cascades to its collection points.
 
+## Control points and logs
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/templates/{id}/control-points` | List template control points |
+| GET/POST | `/api/v1/control-points/{id}` / `/api/v1/control-points` | Get / create a control point |
+| PUT/DELETE | `/api/v1/control-points/{id}` | Update / delete a control point |
+| POST | `/api/v1/control-points/batch` | Batch-create control points |
+| DELETE | `/api/v1/control-points/batch/{ids}` | Delete comma-separated control point IDs |
+| POST | `/api/v1/control-points/{id}/execute` | Write a control value to one device |
+| GET | `/api/v1/control-logs` | Page control audit logs; filter by `device_id` or `control_point_id` |
+
+Control execution requires an enabled device whose template owns the enabled control point. It
+reuses the JVM protocol session and records both successful and failed protocol writes. The
+`point_config.writeTargets` array enables one logical control to write several addresses; the
+request value may be an object keyed by target key/name or an array in target order.
+
 ## Devices
 
 | Method | Path | Purpose |
@@ -43,6 +60,13 @@ device references it; deleting an unused template cascades to its collection poi
 | GET | `/api/v1/devices/options` | Template and group options |
 | POST | `/api/v1/devices/{id}/test` | Test a protocol connection |
 | POST | `/api/v1/devices/{id}/diagnose` | Run configuration and network diagnosis |
+| POST | `/api/v1/devices/{id}/collect` | Collect every enabled template point |
+| POST | `/api/v1/devices/{id}/collect/{pointId}` | Collect one point |
+| GET | `/api/v1/devices/{id}/realtime` | Get each template point's latest sample |
+| GET | `/api/v1/devices/{id}/history` | Read raw samples; optional `from`, `to`, `limit` |
+| GET | `/api/v1/devices/statistics` | Device, enabled and recently-online counts |
+| GET | `/api/v1/collector/sessions` | Active JVM protocol-session status |
 
-Connection testing and diagnosis currently support the native JVM Modbus TCP driver. Manual
-collection, realtime values, and control points remain unverified in the migration ledger.
+Connection testing, diagnosis, manual collection, realtime values, raw history, and control writes
+currently support the native JVM Modbus TCP driver. Hardware acceptance is still required before
+these capabilities can move from `IN_PROGRESS` to `VERIFIED` in the migration ledger.
