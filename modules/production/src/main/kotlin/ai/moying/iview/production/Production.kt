@@ -32,15 +32,23 @@ class ProductionService(private val repository: ProductionRepository) {
  fun cleanup(cutoff: Instant)=repository.deleteBefore(cutoff)
  fun recordsInWindow(deviceId: Long, start: Instant, endExclusive: Instant) = repository.recordsInWindow(deviceId, start, endExclusive)
  fun inspect(values: List<PointValue>) {
+  val goodValues = values.filter { it.quality == ValueQuality.GOOD }
   val rules=repository.listRules().filter { it.enabled }.associateBy { it.quantityPointId }
-  values.filter { it.quality==ValueQuality.GOOD }.forEach { value ->
+  goodValues.forEach { value ->
    val rule=rules[value.pointId.value] ?: return@forEach; val current=value.longValue() ?: return@forEach
    val previous=repository.checkpoint(value.deviceId.value, value.pointId.value)
+   val qualifiedValue = rule.qualifiedPointId?.let { pointId -> goodValues.firstOrNull { it.deviceId == value.deviceId && it.pointId.value == pointId }?.longValue() }
+   val previousQualified = rule.qualifiedPointId?.let { pointId -> repository.checkpoint(value.deviceId.value, pointId) }
    if (previous != null && current > previous.quantity) {
-    val existing=repository.findRecord(value.deviceId.value, previous.observedAt, maxOf(value.observedAt,previous.observedAt))
-    if(existing==null) { val delta=current-previous.quantity; repository.createRecord(value.deviceId.value,delta,delta,previous.observedAt,maxOf(value.observedAt,previous.observedAt),"production-rule-${rule.id}-v${rule.version}",mapOf("source" to value.source,"counter_point_id" to value.pointId.value.toString())) }
+    val end = maxOf(value.observedAt,previous.observedAt); val existing=repository.findRecord(value.deviceId.value, previous.observedAt, end)
+    if(existing==null) {
+     val delta=current-previous.quantity
+     val qualified = if (rule.qualifiedPointId == null) delta else qualifiedValue?.let { currentQualified -> previousQualified?.takeIf { currentQualified > it.quantity }?.let { (currentQualified - it.quantity).coerceIn(0, delta) } ?: 0 } ?: 0
+     repository.createRecord(value.deviceId.value,delta,qualified,previous.observedAt,end,"production-rule-${rule.id}-v${rule.version}",mapOf("source" to value.source,"counter_point_id" to value.pointId.value.toString(),"qualified_point_id" to (rule.qualifiedPointId?.toString() ?: "")))
+    }
    }
    repository.saveCheckpoint(ProductionCheckpoint(value.deviceId.value,value.pointId.value,current,value.observedAt))
+   if (rule.qualifiedPointId != null && qualifiedValue != null) repository.saveCheckpoint(ProductionCheckpoint(value.deviceId.value,rule.qualifiedPointId,qualifiedValue,value.observedAt))
   }
  }
  private fun validate(c: ProductionRuleCommand) { if(c.templateId<=0||c.quantityPointId<=0||c.qualifiedPointId?.let { it<=0 }==true) throw ProductionValidationException("模板和产量采集点必须有效") }

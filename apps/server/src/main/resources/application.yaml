@@ -35,6 +35,15 @@ iview:
   data-source:
     # 开发默认值；生产环境必须通过 IVIEW_DATASOURCE_SECRET 覆盖，且不得变更已有值。
     secret: ${IVIEW_DATASOURCE_SECRET:iview-development-secret-change-me}
+  auth:
+    # 开发默认账号仅用于首次空库启动；生产环境必须通过环境变量覆盖这两个值。
+    token-secret: ${IVIEW_AUTH_TOKEN_SECRET:iview-development-token-secret-change-me}
+    bootstrap-admin-password: ${IVIEW_BOOTSTRAP_ADMIN_PASSWORD:ChangeMe123!}
+  backup:
+    directory: ${IVIEW_BACKUP_DIRECTORY:./data/backups}
+    retention-count: ${IVIEW_BACKUP_RETENTION_COUNT:7}
+    # 恢复会重建整个 H2 数据库，只能在维护窗口明确启用。
+    restore-enabled: ${IVIEW_BACKUP_RESTORE_ENABLED:false}
   collector:
     scheduling-enabled: false
     scan-delay-ms: 1000

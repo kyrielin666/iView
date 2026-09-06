@@ -27,7 +27,7 @@ class PostgresController {
 internal fun execute(connection: java.sql.Connection, sql: String, values: List<String> = emptyList()): SqlResult = connection.prepareStatement(sql).use { statement ->
  values.forEachIndexed { index, value -> statement.setString(index + 1, value) }
  statement.queryTimeout = 30
- statement.executeQuery(sql).use { rs ->
+ statement.executeQuery().use { rs ->
   val meta = rs.metaData
   val columns = (1..meta.columnCount).map { SchemaColumn(meta.getColumnLabel(it), meta.getColumnTypeName(it), meta.isNullable(it) != 0) }
   val rows = generateSequence { if (rs.next()) (1..meta.columnCount).map(rs::getObject) else null }.toList()

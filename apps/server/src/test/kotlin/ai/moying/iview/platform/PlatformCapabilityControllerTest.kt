@@ -14,6 +14,7 @@ class PlatformCapabilityControllerTest {
         assertTrue(response.data?.capabilities?.any { it.name == "protocol-spi" } == true)
         assertTrue(response.data?.capabilities?.any { it.name == "modbus-tcp" && it.status == "in-progress" } == true)
         assertTrue(response.data?.frontendCapabilities?.any { it.name == "看板文档编辑" && it.scope == "frontend" } == true)
-        assertEquals(32, response.data?.ledger?.inProgress)
+        assertEquals(33, response.data?.ledger?.inProgress)
+        assertEquals(25, response.data?.ledger?.notStarted)
     }
 }

@@ -51,6 +51,6 @@ class PlatformCapabilityController {
             CapabilityStatus("组件数据绑定运行时", "in-progress", "frontend"),
             CapabilityStatus("图层拖拽与组件渲染", "in-progress", "frontend"),
         ),
-        ledger = MigrationLedgerSummary(total = 58, inProgress = 32, notStarted = 26, verified = 0),
+        ledger = MigrationLedgerSummary(total = 58, inProgress = 33, notStarted = 25, verified = 0),
     ))
 }

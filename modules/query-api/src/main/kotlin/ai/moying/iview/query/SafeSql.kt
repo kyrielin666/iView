@@ -3,6 +3,7 @@ package ai.moying.iview.query
 class QueryValidationException(message: String) : RuntimeException(message)
 
 object SafeSql {
+    private val literalLimit = Regex("(?i)\\blimit\\s+(\\d+)\\b")
     fun selectOnly(sql: String): String {
         val normalized = sql.trim()
         if (normalized.isBlank()) throw QueryValidationException("SQL 不能为空")
@@ -17,6 +18,9 @@ object SafeSql {
     fun limit(sql: String, maxRows: Int): String {
         require(maxRows in 1..10_000) { "最大行数必须在1到10000之间" }
         val checked = selectOnly(sql)
-        return if (Regex("(?i)\\blimit\\s+\\d+").containsMatchIn(checked)) checked else "$checked LIMIT $maxRows"
+        if (!literalLimit.containsMatchIn(checked)) return "$checked LIMIT $maxRows"
+        return literalLimit.replace(checked) { match ->
+            "LIMIT ${match.groupValues[1].toLongOrNull()?.coerceAtMost(maxRows.toLong()) ?: maxRows}"
+        }
     }
 }

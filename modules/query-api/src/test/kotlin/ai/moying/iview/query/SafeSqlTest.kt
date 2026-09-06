@@ -2,6 +2,7 @@ package ai.moying.iview.query
 import kotlin.test.*
 class SafeSqlTest {
  @Test fun `accepts select and adds limit`(){assertEquals("SELECT id FROM device LIMIT 100",SafeSql.limit("SELECT id FROM device",100))}
+ @Test fun `clamps existing literal limits`(){assertEquals("SELECT id FROM device LIMIT 100",SafeSql.limit("SELECT id FROM device LIMIT 100000",100))}
  @Test fun `rejects writes multi statements and comments`(){listOf("DELETE FROM x","SELECT 1; DELETE FROM x","SELECT 1 -- x").forEach{assertFailsWith<QueryValidationException>{SafeSql.selectOnly(it)}}}
  @Test fun `binds dashboard variables as JDBC parameters`(){
   val bound=DatasetSql.bindVariables("SELECT * FROM orders WHERE line={{line}} AND shift={{shift}}",mapOf("line" to "A' OR 1=1", "shift" to "N"))

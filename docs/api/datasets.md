@@ -9,10 +9,10 @@
 | `GET/PUT/DELETE /api/v1/datasets/{id}` | 读取、更新、删除 |
 | `POST /api/v1/datasets/{id}/copy` | 复制数据集，请求体传入新 `name` |
 | `PUT /api/v1/datasets/{id}/folder` | 移动到 `folder_id`；传 `null` 回到根目录 |
-| `POST /api/v1/datasets/{id}/preview` | 用关联数据源执行受限预览查询 |
-| `POST /api/v1/datasets/{id}/schema` | 读取结果字段结构，不取业务数据 |
-| `POST /api/v1/datasets/{id}/explain` | 读取 PostgreSQL JSON 执行计划 |
-| `POST /api/v1/datasets/{id}/export` | 执行受限 SQL 并下载最多 10,000 行 CSV |
+| `POST /api/v1/datasets/{id}/preview` | 用关联数据源执行受限预览查询；请求体可传 `max_rows`、`variables` |
+| `POST /api/v1/datasets/{id}/schema` | 读取结果字段结构，不取业务数据；请求体传 `variables` |
+| `POST /api/v1/datasets/{id}/explain` | 读取 PostgreSQL JSON 执行计划；请求体传 `variables` |
+| `POST /api/v1/datasets/{id}/export` | 执行受限 SQL 并下载最多 10,000 行 CSV；请求体传 `variables` |
 
 数据集文件夹使用 `/api/v1/dataset-folders` 的 `GET/POST/PUT/DELETE`。文件夹可嵌套；非空文件夹（包含数据集或子文件夹）不可删除，以避免隐式移动或删除资产。
 
@@ -27,4 +27,4 @@
 }
 ```
 
-数据集创建和更新时都会校验 SQL；预览时还会再次施加默认 1000、最大 10000 行的行数上限。Explain 仅包装该已保存的受限 SQL，不能注入任意命令。导出统一以最多 10,000 行 CSV 返回；字段血缘尚未迁移。
+数据集创建和更新时都会校验 SQL；预览时还会再次施加默认 1000、最大 10000 行的行数上限，已有字面量 `LIMIT` 也会被收紧。SQL 中的 `{{变量名}}` 在预览、结构读取、Explain 和导出时都会转为 JDBC 参数，不会通过字符串拼接写入查询。Explain 仅包装该已保存的受限 SQL，不能注入任意命令。导出统一以最多 10,000 行 CSV 返回；字段血缘尚未迁移。

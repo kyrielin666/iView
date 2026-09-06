@@ -26,6 +26,7 @@ import java.sql.DriverManager
 
 class DataModelRequest { var datasetId: Long? = null; var name: String = ""; var description: String? = null }
 class DataModelPreviewRequest { var variables: Map<String, String> = emptyMap() }
+class DataModelSyncRequest { var variables: Map<String, String> = emptyMap() }
 
 @RestController
 @RequestMapping("/api/v1/data-models")
@@ -40,7 +41,7 @@ class DataModelController(
     @PutMapping("/{id}") fun update(@PathVariable id: Long, @RequestBody request: DataModelRequest) = ApiResponse.success(view(models.update(id, request.draft())))
     @DeleteMapping("/{id}") fun delete(@PathVariable id: Long): ApiResponse<Nothing> { models.delete(id); return ApiResponse.success() }
     @GetMapping("/{id}/schemas") fun schemas(@PathVariable id: Long) = ApiResponse.success(models.schemas(id).map(::schemaView))
-    @PostMapping("/{id}/sync") fun sync(@PathVariable id: Long) = ApiResponse.success(syncView(models.sync(id, readFields(id))))
+    @PostMapping("/{id}/sync") fun sync(@PathVariable id: Long, @RequestBody(required = false) request: DataModelSyncRequest?) = ApiResponse.success(syncView(models.sync(id, readFields(id, request?.variables ?: emptyMap()))))
     @PostMapping("/{id}/publish") fun publish(@PathVariable id: Long) = ApiResponse.success(view(models.publish(id)))
     @PostMapping("/{id}/preview") fun preview(@PathVariable id: Long, @RequestBody request: DataModelPreviewRequest): ApiResponse<SqlResult> {
         val model = models.get(id)
@@ -50,10 +51,13 @@ class DataModelController(
         return ApiResponse.success(DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { execute(it, bound.sql, bound.values) })
     }
 
-    private fun readFields(id: Long): List<DataModelField> {
+    private fun readFields(id: Long, variables: Map<String, String>): List<DataModelField> {
         val model = models.get(id); val dataset = datasets.get(model.datasetId); val credential = sources.credential(dataset.sourceId)
+        val bound = DatasetSql.bindVariables(DatasetSql.schemaQuery(dataset.sql), variables)
         return DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { connection ->
-            connection.prepareStatement(DatasetSql.schemaQuery(dataset.sql)).use { statement -> statement.executeQuery().use { rs ->
+            connection.prepareStatement(bound.sql).use { statement ->
+                bound.values.forEachIndexed { index, value -> statement.setString(index + 1, value) }
+                statement.executeQuery().use { rs ->
                 val metadata = rs.metaData; (1..metadata.columnCount).map { DataModelField(metadata.getColumnLabel(it), metadata.getColumnTypeName(it), metadata.isNullable(it) != 0) }
             } }
         }

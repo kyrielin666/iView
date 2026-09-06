@@ -32,10 +32,11 @@ class DatasetRequest {
     var sql: String = ""
     var description: String? = null
 }
-class DatasetPreviewRequest { var maxRows: Int? = null }
+class DatasetPreviewRequest { var maxRows: Int? = null; var variables: Map<String, String> = emptyMap() }
 class DatasetCopyRequest { var name: String = "" }
 class DatasetMoveRequest { var folderId: Long? = null }
 class DatasetFolderRequest { var name: String = ""; var parentId: Long? = null; var description: String? = null }
+class DatasetVariablesRequest { var variables: Map<String, String> = emptyMap() }
 
 @RestController
 @RequestMapping("/api/v1/datasets")
@@ -50,27 +51,35 @@ class DatasetController(private val datasets: DatasetService, private val source
     @PostMapping("/{id}/preview") fun preview(@PathVariable id: Long, @RequestBody request: DatasetPreviewRequest): ApiResponse<SqlResult> {
         val dataset = datasets.get(id)
         val credential = sources.credential(dataset.sourceId)
-        val sql = SafeSql.limit(dataset.sql, request.maxRows ?: 1_000)
-        return ApiResponse.success(DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { execute(it, sql) })
+        val bound = DatasetSql.bindVariables(SafeSql.limit(dataset.sql, request.maxRows ?: 1_000), request.variables)
+        return ApiResponse.success(DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { execute(it, bound.sql, bound.values) })
     }
-    @PostMapping("/{id}/export") fun export(@PathVariable id: Long): ResponseEntity<ByteArray> {
+    @PostMapping("/{id}/export") fun export(@PathVariable id: Long, @RequestBody(required = false) request: DatasetVariablesRequest?): ResponseEntity<ByteArray> {
         val dataset = datasets.get(id); val credential = sources.credential(dataset.sourceId)
-        val result = DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { execute(it, SafeSql.limit(dataset.sql, 10_000)) }
+        val bound = DatasetSql.bindVariables(SafeSql.limit(dataset.sql, 10_000), request?.variables ?: emptyMap())
+        val result = DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { execute(it, bound.sql, bound.values) }
         val csv = ai.moying.iview.query.CsvExport.render(result.columns.map { it.name }, result.rows).toByteArray(Charsets.UTF_8)
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=dataset-${dataset.id}.csv").contentType(MediaType.parseMediaType("text/csv;charset=UTF-8")).body(csv)
     }
-    @PostMapping("/{id}/schema") fun schema(@PathVariable id: Long): ApiResponse<List<SchemaColumn>> {
+    @PostMapping("/{id}/schema") fun schema(@PathVariable id: Long, @RequestBody(required = false) request: DatasetVariablesRequest?): ApiResponse<List<SchemaColumn>> {
         val dataset = datasets.get(id); val credential = sources.credential(dataset.sourceId)
         return ApiResponse.success(DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { connection ->
-            connection.prepareStatement(DatasetSql.schemaQuery(dataset.sql)).use { statement -> statement.executeQuery().use { rs ->
+            val bound = DatasetSql.bindVariables(DatasetSql.schemaQuery(dataset.sql), request?.variables ?: emptyMap())
+            connection.prepareStatement(bound.sql).use { statement ->
+                bound.values.forEachIndexed { index, value -> statement.setString(index + 1, value) }
+                statement.executeQuery().use { rs ->
                 val meta = rs.metaData; (1..meta.columnCount).map { SchemaColumn(meta.getColumnLabel(it), meta.getColumnTypeName(it), meta.isNullable(it) != 0) }
             } }
         })
     }
-    @PostMapping("/{id}/explain") fun explain(@PathVariable id: Long): ApiResponse<List<String>> {
+    @PostMapping("/{id}/explain") fun explain(@PathVariable id: Long, @RequestBody(required = false) request: DatasetVariablesRequest?): ApiResponse<List<String>> {
         val dataset = datasets.get(id); val credential = sources.credential(dataset.sourceId)
         return ApiResponse.success(DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { connection ->
-            connection.createStatement().use { statement -> statement.executeQuery(DatasetSql.explainQuery(dataset.sql)).use { rs -> generateSequence { if (rs.next()) rs.getString(1) else null }.toList() } }
+            val bound = DatasetSql.bindVariables(DatasetSql.explainQuery(dataset.sql), request?.variables ?: emptyMap())
+            connection.prepareStatement(bound.sql).use { statement ->
+                bound.values.forEachIndexed { index, value -> statement.setString(index + 1, value) }
+                statement.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getString(1) else null }.toList() }
+            }
         })
     }
     private fun DatasetRequest.draft() = DatasetDraft(sourceId ?: 0, folderId, name, sql, description ?: "")

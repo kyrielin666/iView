@@ -1,8 +1,10 @@
 # Device OEE API
 
 `GET /api/v1/devices/{deviceId}/oee` calculates an auditable OEE result from persisted machine-state
-intervals and production records. Required query parameters are ISO-8601 `start`, `end`, and
-`planned_production_ms`; optional `ideal_cycle_ms` enables performance and final OEE calculation.
+intervals and production records. Required query parameters are ISO-8601 `start` and `end`;
+`planned_production_ms` can override the planned duration, while configured shifts and planned
+downtime provide the normal production-time windows. Optional `ideal_cycle_ms` enables performance
+and final OEE calculation.
 
 Example:
 
@@ -11,5 +13,5 @@ Example:
 ```
 
 The response retains `window_start`, `window_end`, the `rule_versions` used by state intervals, and
-the calculation version. Planned-production time is explicit for now; shifts, calendars and planned
-downtime will later provide that value without changing this calculation contract.
+the calculation version. Running time is clipped to configured shift windows after global/device
+planned downtime is removed, so running samples outside a shift do not improve shift availability.

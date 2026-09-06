@@ -23,6 +23,9 @@ import ai.moying.iview.query.DataModelNotFoundException
 import ai.moying.iview.query.DataModelValidationException
 import ai.moying.iview.query.DashboardNotFoundException
 import ai.moying.iview.query.DashboardValidationException
+import ai.moying.iview.identity.AuthenticationException
+import ai.moying.iview.identity.AuthorizationException
+import ai.moying.iview.backup.BackupException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.ExceptionHandler
@@ -40,6 +43,14 @@ data class ApiResponse<T>(
 
 @RestControllerAdvice
 class ApiExceptionHandler {
+    @ExceptionHandler(AuthenticationException::class)
+    fun authentication(error: AuthenticationException) = response(HttpStatus.UNAUTHORIZED, error.message)
+
+    @ExceptionHandler(AuthorizationException::class)
+    fun authorization(error: AuthorizationException) = response(HttpStatus.FORBIDDEN, error.message)
+
+    @ExceptionHandler(BackupException::class)
+    fun backup(error: BackupException) = response(HttpStatus.CONFLICT, error.message)
     @ExceptionHandler(CatalogNotFoundException::class)
     fun notFound(error: CatalogNotFoundException) = response(HttpStatus.NOT_FOUND, error.message)
 

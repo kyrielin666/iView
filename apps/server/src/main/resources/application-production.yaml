@@ -9,3 +9,6 @@ spring:
 iview:
   data-source:
     secret: ${IVIEW_DATASOURCE_SECRET}
+  auth:
+    token-secret: ${IVIEW_AUTH_TOKEN_SECRET}
+    bootstrap-admin-password: ${IVIEW_BOOTSTRAP_ADMIN_PASSWORD}

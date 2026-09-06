@@ -30,6 +30,7 @@ data class OeeInput(
     val production: ProductionCount,
     val idealCycleTime: Duration?,
     val calculationVersion: String,
+    val plannedWindows: List<TimeWindow> = listOf(calculationWindow),
 )
 
 data class OeeResult(
@@ -48,9 +49,10 @@ class OeeCalculator {
         require(input.plannedProduction <= input.calculationWindow.duration) {
             "Planned production cannot exceed the calculation window"
         }
+        val plannedWindows = merge(input.plannedWindows.mapNotNull { clip(it, input.calculationWindow) })
         val running = input.stateIntervals.asSequence()
             .filter { it.state == MachineState.RUNNING }
-            .mapNotNull { intersect(it.window, input.calculationWindow) }
+            .flatMap { interval -> plannedWindows.asSequence().mapNotNull { planned -> intersect(interval.window, planned) } }
             .fold(Duration.ZERO, Duration::plus)
             .coerceAtMost(input.plannedProduction)
         val availability = ratio(running, input.plannedProduction) ?: 0.0
@@ -75,6 +77,21 @@ class OeeCalculator {
         val start = maxOf(left.start, right.start)
         val end = minOf(left.endExclusive, right.endExclusive)
         return if (end.isAfter(start)) Duration.between(start, end) else null
+    }
+
+    private fun clip(left: TimeWindow, right: TimeWindow): TimeWindow? {
+        val start = maxOf(left.start, right.start); val end = minOf(left.endExclusive, right.endExclusive)
+        return if (end.isAfter(start)) TimeWindow(start, end) else null
+    }
+
+    private fun merge(windows: List<TimeWindow>): List<TimeWindow> {
+        val merged = mutableListOf<TimeWindow>()
+        windows.sortedBy { it.start }.forEach { window ->
+            val previous = merged.lastOrNull()
+            if (previous == null || window.start.isAfter(previous.endExclusive)) merged += window
+            else merged[merged.lastIndex] = TimeWindow(previous.start, maxOf(previous.endExclusive, window.endExclusive))
+        }
+        return merged
     }
 
     private fun ratio(numerator: Duration, denominator: Duration): Double? =

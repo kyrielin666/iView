@@ -110,6 +110,8 @@ npm run dev
 apps/server                    Spring Boot HTTP 入口与装配
 modules/protocol-spi           协议驱动统一接口
 modules/protocol-modbus-tcp    原生 JVM Modbus TCP 驱动
+modules/protocol-modbus-rtu    原生 JVM Modbus RTU 串口驱动
+modules/protocol-mitsubishi-mc3e 原生 JVM 三菱 MC 3E TCP 驱动
 modules/device                 设备目录领域逻辑
 modules/collector              采集编排与会话管理
 modules/telemetry              原始点位采样
@@ -126,7 +128,7 @@ docs                           架构、API 与迁移台账
 
 ## 迁移进度
 
-当前台账共 58 项：32 项进行中、26 项未开始、0 项完成验收。代码实现不等于功能验收；涉及工业协议的能力还需要真实设备测试、长时间稳定性测试和回滚演练。
+当前台账共 58 项：34 项进行中、24 项未开始、0 项完成验收。代码实现不等于功能验收；涉及工业协议的能力还需要真实设备测试、长时间稳定性测试和回滚演练。
 
 完整状态见 [功能迁移台账](docs/migration/feature-parity.md)。
 
@@ -140,7 +142,7 @@ docs                           架构、API 与迁移台账
 
 ## 后续方向
 
-- 扩展 Modbus RTU、三菱 MC、S7、OPC UA、FINS、FOCAS 等协议
+- 继续扩展三菱 MC 4E/A1E、S7、OPC UA、FINS、FOCAS 等协议
 - 完成身份认证、RBAC、部门、菜单与审计日志
 - 增加 MongoDB、CSV/文件和 HTTP 数据源
 - 完善拖拽式图层编辑、完整图表组件库与响应式发布运行时
@@ -153,7 +155,11 @@ docs                           架构、API 与迁移台账
 - [看板 API](docs/api/dashboards.md)
 - [数据集 API](docs/api/datasets.md)
 - [设备目录 API](docs/api/device-catalog.md)
+- [身份认证 API](docs/api/authentication.md)
+- [备份恢复 API](docs/api/backups.md)
 - [Modbus TCP](docs/protocols/modbus-tcp.md)
+- [Modbus RTU](docs/protocols/modbus-rtu.md)
+- [三菱 MC 3E](docs/protocols/mitsubishi-mc3e.md)
 - [迁移台账](docs/migration/feature-parity.md)
 
 如果你在寻找一套可裁剪、可私有部署、能继续扩展工业协议和行业组件的轻量化看板底座，iView 正朝这个方向持续完善。

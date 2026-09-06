@@ -3,3 +3,7 @@ spring:
     url: jdbc:h2:mem:iview-test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
     username: sa
     password:
+
+iview:
+  auth:
+    enforced: false

@@ -45,6 +45,12 @@ class OeeCalculatorTest {
         assertEquals(0.5, result.availability)
     }
 
+    @Test fun `counts running time only inside planned windows`() {
+        val result = OeeCalculator().calculate(OeeInput(window(0, 8), Duration.ofHours(4), listOf(MachineStateInterval(window(0, 8), MachineState.RUNNING, "state-v1")), ProductionCount(0, 0), null, "oee-v1", listOf(window(2, 6))))
+        assertEquals(Duration.ofHours(4), result.running)
+        assertEquals(1.0, result.availability)
+    }
+
     private fun window(startHour: Long, endHour: Long) = TimeWindow(
         start = shiftStart.plus(Duration.ofHours(startHour)),
         endExclusive = shiftStart.plus(Duration.ofHours(endHour)),

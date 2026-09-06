@@ -12,9 +12,9 @@ Nothing may be marked `VERIFIED` based only on code presence.
 
 | Capability | Legacy reference | Status | Acceptance evidence |
 |---|---|---|---|
-| Login, refresh token, logout, current user | `scada-preview`, `my-scada-next` | NOT_STARTED | — |
+| Login, refresh token, logout, current user | `scada-preview`, `my-scada-next` | IN_PROGRESS | Persistent bootstrap administrator, PBKDF2 password verification, signed short-lived access tokens and rotating/revocable refresh tokens; API test pending execution |
 | SSO signed login | `scada-preview` | NOT_STARTED | — |
-| Users, roles, permissions | `scada-preview`, `my-scada-next` | NOT_STARTED | — |
+| Users, roles, permissions | `scada-preview`, `my-scada-next` | IN_PROGRESS | User/role/permission persistence schema and initial ADMIN role are present; administrative CRUD and route enforcement remain |
 | Departments, menus and route permissions | `scada-preview`, `my-scada-next` | NOT_STARTED | — |
 | Dictionaries and dictionary items | `scada-preview`, `my-scada-next` | NOT_STARTED | — |
 | Devices and device groups | `scada-preview`, `my-scada-next` | IN_PROGRESS | JDBC/Flyway persistence and compatible CRUD API; integration flow in `DeviceCatalogApiTest` |
@@ -30,12 +30,12 @@ Nothing may be marked `VERIFIED` based only on code presence.
 | Alarm rules, records and cleanup | `dashboard-service`, `scada-preview` | IN_PROGRESS | Device abnormal/recovery deduplication, ordered regex classification, persistent records, explicit cleanup API and management UI; production retention schedule and device acceptance remain |
 | Machine-state rules and standardization | `dashboard-service` | IN_PROGRESS | Point-value mapping, default fallback, versioned rules, current-state projection and persisted OEE-ready intervals; legacy message-source extraction and production acceptance remain |
 | Runtime periods and daily accumulation | `dashboard-service` | IN_PROGRESS | OEE interval calculator foundation |
-| Production records and quantity rules | `dashboard-service` | IN_PROGRESS | Versioned quantity-point binding, persistent per-device checkpoints, rising-counter deltas, idempotent records and cleanup API; qualified-count point and production acceptance remain |
+| Production records and quantity rules | `dashboard-service` | IN_PROGRESS | Versioned quantity/qualified-point binding, persistent per-device checkpoints, rising-counter deltas, idempotent records and cleanup API; qualified counter deltas are bounded by total output; production acceptance remains |
 | Shifts, calendars and planned downtime | product requirement | IN_PROGRESS | Versioned recurring shift and global/device downtime persistence; cross-midnight and downtime subtraction tests; production calendar acceptance remains |
-| Availability/utilization and OEE | product requirement | IN_PROGRESS | Deterministic calculator plus device/time-window API reading persisted state intervals and production records; shift/calendar acceptance remains |
+| Availability/utilization and OEE | product requirement | IN_PROGRESS | Deterministic calculator plus device/time-window API reading persisted state intervals and production records; running time is clipped to effective shift/downtime windows; shift/calendar acceptance remains |
 | Tiangong config, sync and last-will | `scada-preview`, `my-scada-next` | NOT_STARTED | — |
 | Resource/system monitoring | `scada-preview`, `my-scada-next` | NOT_STARTED | — |
-| Backup and restore | `scada-preview` | NOT_STARTED | — |
+| Backup and restore | `scada-preview` | IN_PROGRESS | H2 logical backup, SHA-256 validation, bounded retention and maintenance-window-gated restore API; PostgreSQL pg_dump/pg_restore job integration remains |
 | OpenAPI device/template import | `scada-preview` | NOT_STARTED | — |
 
 ## Industrial protocols
@@ -43,8 +43,8 @@ Nothing may be marked `VERIFIED` based only on code presence.
 | Protocol | Legacy reference | Status | Required acceptance |
 |---|---|---|---|
 | Modbus TCP | `plugins/modbus_tcp` | IN_PROGRESS | JVM frame read/write, endian, scaling, merged batch read, timeout and reconnect tests; hardware acceptance remains |
-| Modbus RTU | `plugins/modbus_rtu` | NOT_STARTED | serial framing, CRC, read/write, timeout |
-| Mitsubishi MC 3E | `plugins/mits_mc_3e` | NOT_STARTED | address ranges, binary frames, read/write |
+| Modbus RTU | `plugins/modbus_rtu` | IN_PROGRESS | JVM serial driver, RTU CRC, read/write, type/byte-order conversion and reconnect are implemented; deterministic tests cover exception/CRC failure, reconnect and 10,000 exchanges; this host exposes no COM port, so RS485 hardware acceptance remains |
+| Mitsubishi MC 3E | `plugins/mits_mc_3e` | IN_PROGRESS | Native JVM binary 3E TCP driver covers legacy device codes and address radices, bit/word read-write, numeric word order, response validation, quality mapping and reconnect; deterministic evidence: `modules/protocol-mitsubishi-mc3e/src/test/kotlin/ai/moying/iview/protocol/mitsubishi/mc3e/MitsubishiMc3eDriverTest.kt`; FX5U/Q/L/iQ-R hardware and sustained-load acceptance remain |
 | Mitsubishi MC 4E | `plugins/mits_mc_4e` | NOT_STARTED | serial number handling, read/write |
 | Mitsubishi MC A1E | `plugins/mits_mc_a1e` | NOT_STARTED | address parsing, read/write |
 | Siemens S7 | `plugins/s7comm` | NOT_STARTED | areas/types, batching, reconnect |
@@ -66,7 +66,7 @@ Nothing may be marked `VERIFIED` based only on code presence.
 | Query validation, planning and pushdown | `dashboard-service/query-engine` | IN_PROGRESS | Single-statement SELECT validation, comment/write rejection and bounded LIMIT enforcement; logical-plan pushdown remains |
 | Filter, project, aggregate, having, order and limit | `dashboard-service/query-engine` | NOT_STARTED | — |
 | Dataset CRUD, folders, copy and move | `dashboard-service`, `data-board` | IN_PROGRESS | PostgreSQL-backed CRUD, folders, protected deletion, copy and move are implemented; acceptance and bulk operations remain | `modules/query-api/src/test/kotlin/ai/moying/iview/query/DatasetServiceTest.kt` |
-| Dataset schema, query, preview, explain and export | `dashboard-service`, `data-board` | IN_PROGRESS | Dataset SQL validation, preview, field metadata, PostgreSQL JSON Explain and bounded CSV export are implemented; schema cache remains | `modules/query-api/src/test/kotlin/ai/moying/iview/query/CsvExportTest.kt` |
+| Dataset schema, query, preview, explain and export | `dashboard-service`, `data-board` | IN_PROGRESS | Dataset SQL validation, bounded preview, field metadata, PostgreSQL JSON Explain and CSV export are implemented; dynamic variables use JDBC parameters in every execution path; schema cache remains | `modules/query-api/src/test/kotlin/ai/moying/iview/query/CsvExportTest.kt` |
 | Data models, drift detection, sync and publish | `dashboard-service`, `data-board` | IN_PROGRESS | Dataset-backed model CRUD, versioned schema snapshots, manual sync, drift state and explicit publish are implemented; scheduled sync and downstream binding remain | `modules/query-api/src/test/kotlin/ai/moying/iview/query/DataModelServiceTest.kt` |
 | Dashboard CRUD and folders | `dashboard-service`, `data-board` | IN_PROGRESS | Dashboard draft CRUD, optional model binding and protected nested folders are implemented; canvas editing remains | `modules/query-api/src/test/kotlin/ai/moying/iview/query/DashboardServiceTest.kt` |
 | Snapshots and publish | `dashboard-service`, `data-board` | IN_PROGRESS | Immutable versioned snapshots and explicit publish are implemented; public sharing and runtime routing remain | `modules/query-api/src/test/kotlin/ai/moying/iview/query/DashboardServiceTest.kt` |
@@ -75,9 +75,9 @@ Nothing may be marked `VERIFIED` based only on code presence.
 | Low-code canvas, grid/free layout and layers | `data-board` | IN_PROGRESS | Versioned grid/free canvas document and bounded component layout validation are implemented; the frontend can read/edit/save documents and add supported components, while drag-and-drop layers UI remains | `modules/query-api/src/test/kotlin/ai/moying/iview/query/DashboardDocumentValidatorTest.kt` |
 | Charts, VChart, tables, information and decoration components | `data-board` | IN_PROGRESS | Preview runtime renders bound metric values, bounded data tables and numeric bar charts; VChart and the complete component library remain | `iView-frontend/app.js` |
 | Component data binding and dynamic variables | `data-board` | IN_PROGRESS | Components bind only to published models; the preview runtime reads bounded model data for metric/table/chart summaries; variable substitution in query parameters remains | `iView-frontend/app.js` |
-| Conditional styles | `data-board` | IN_PROGRESS | Document-level conditional style rules are validated and applied in preview from explicit `props.preview_data`; live data binding and production renderer coverage remain | `iView-frontend/app.js` |
-| Component interactions and parameterized jumps | `data-board` | IN_PROGRESS | Validated click/change definitions; preview runtime now executes click filter, variable-setting and target-dashboard navigation interactions, while full component event coverage remains | `iView-frontend/app.js` |
-| Batch container, tuple component and pagination | `data-board` | IN_PROGRESS | Preview supports table pagination, tuple fields, and repeat containers whose child instances receive row-scoped click interactions; visual repeat composition controls are available, while drag/drop nesting remains | `iView-frontend/app.js` |
+| Conditional styles | `data-board` | IN_PROGRESS | Document-level conditional style rules are validated and applied from bound model rows in preview; production renderer coverage remains | `iView-frontend/app.js` |
+| Component interactions and parameterized jumps | `data-board` | IN_PROGRESS | Validated click/change definitions; preview runtime applies click filters/variables, reloads bound model queries, and passes resolved variables to target-dashboard navigation; full component event coverage remains | `iView-frontend/app.js` |
+| Batch container, tuple component and pagination | `data-board` | IN_PROGRESS | Preview supports table pagination, tuple fields, and repeat containers whose child instances render metric/table/chart/tuple content with row-scoped interactions; visual repeat composition controls are available, while drag/drop nesting remains | `iView-frontend/app.js` |
 | Preview, published runtime and responsive scaling | `data-board` | IN_PROGRESS | Draft and immutable published-snapshot previews with proportional canvas scaling and bounded component placeholders are available; data binding and responsive runtime remain | `iView-frontend/app.js` |
 | Theme, animation, i18n and icon support | `data-board` | NOT_STARTED | — |
 

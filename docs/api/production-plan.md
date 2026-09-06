@@ -6,7 +6,7 @@ planned downtime, including shifts that cross midnight.
 
 - `GET`, `POST /api/v1/shifts`
 - `PUT`, `DELETE /api/v1/shifts/{id}`
-- `GET /api/v1/planned-downtimes?device_id=1&start=...&end=...`
+- `GET /api/v1/planned-downtimes?deviceId=1&start=...&end=...`（`deviceId` 可省略，以查看全局和全部设备的停机配置）
 - `POST /api/v1/planned-downtimes`
 - `DELETE /api/v1/planned-downtimes/{id}`
 
