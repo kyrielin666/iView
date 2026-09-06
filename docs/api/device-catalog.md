@@ -69,4 +69,4 @@ request value may be an object keyed by target key/name or an array in target or
 
 Connection testing, diagnosis, manual collection, realtime values, raw history, and control writes
 currently support the native JVM Modbus TCP driver. Hardware acceptance is still required before
-these capabilities can move from `IN_PROGRESS` to `VERIFIED` in the migration ledger.
+production use.

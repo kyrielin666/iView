@@ -7,8 +7,8 @@ The old repositories are read-only references. Never edit them from this project
 
 ## Non-negotiable rules
 
-- A legacy feature is complete only after behavior-level parity is verified and recorded in
-  `docs/migration/feature-parity.md`.
+- A legacy feature is complete only after behavior-level parity is verified and recorded in the
+  release acceptance evidence maintained outside the public repository.
 - Protocol drivers depend only on `protocol-spi` and `core-model`; business modules never contain
   protocol-specific branches.
 - Dashboard components consume datasets or explicit realtime subscriptions. They do not query

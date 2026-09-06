@@ -23,5 +23,4 @@ accepted. When batching is enabled, values keep their original point order and p
 
 Reads support coils, discrete inputs, input registers, and holding registers. Writes support coils
 and holding registers. A transport I/O failure closes the stale socket, reconnects once, and retries
-the request. The migration ledger remains `IN_PROGRESS` until batching and physical-device
-acceptance are complete.
+the request. Physical-device acceptance remains required before production use.

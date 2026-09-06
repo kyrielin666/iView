@@ -123,14 +123,8 @@ modules/production-plan        班次与计划停机
 modules/oee                    稼动率与 OEE 计算
 modules/query-api              数据源、数据集、模型与看板领域
 modules/*-jdbc                 JDBC 持久化适配器
-docs                           架构、API 与迁移台账
+docs                           架构与 API 文档
 ```
-
-## 迁移进度
-
-当前台账共 58 项：34 项进行中、24 项未开始、0 项完成验收。代码实现不等于功能验收；涉及工业协议的能力还需要真实设备测试、长时间稳定性测试和回滚演练。
-
-完整状态见 [功能迁移台账](docs/migration/feature-parity.md)。
 
 ## 适用场景
 
@@ -160,6 +154,5 @@ docs                           架构、API 与迁移台账
 - [Modbus TCP](docs/protocols/modbus-tcp.md)
 - [Modbus RTU](docs/protocols/modbus-rtu.md)
 - [三菱 MC 3E](docs/protocols/mitsubishi-mc3e.md)
-- [迁移台账](docs/migration/feature-parity.md)
 
 如果你在寻找一套可裁剪、可私有部署、能继续扩展工业协议和行业组件的轻量化看板底座，iView 正朝这个方向持续完善。
