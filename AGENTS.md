@@ -23,4 +23,4 @@ The old repositories are read-only references. Never edit them from this project
 - Production code has automated tests for deterministic behavior.
 - Public APIs and persisted schemas are documented.
 - Failure, timeout, reconnect, and bad-quality behavior are considered for device communication.
-- The feature parity row links to tests or an acceptance record before becoming `VERIFIED`.
+- Release acceptance evidence links to tests or a signed acceptance record before a feature is declared verified.

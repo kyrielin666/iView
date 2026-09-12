@@ -20,6 +20,10 @@ import java.time.Duration
 import java.time.Instant
 import org.apache.plc4x.java.DefaultPlcDriverManager
 import org.apache.plc4x.java.api.PlcConnection
+import org.apache.plc4x.java.api.types.PlcResponseCode
+import java.net.SocketTimeoutException
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 /** Siemens S7 TCP configuration and legacy-address normalizer. */
 class S7Driver : ProtocolDriver {
@@ -60,23 +64,42 @@ private class S7Session(private val device: DeviceDefinition) : ProtocolSession 
     private val lock = Any(); private var connection: PlcConnection? = null
     private val host get() = (device.connectionProperties["host"] ?: device.connectionProperties["ip_address"]).orEmpty()
     private val timeout get() = device.connectionProperties["timeout"]?.toLongOrNull() ?: 5000L
-    private fun url() = "s7://$host?remote-rack=${device.connectionProperties["rack"] ?: 0}&remote-slot=${device.connectionProperties["slot"] ?: 1}&tcp.default-timeout=$timeout"
+    private fun url() = s7ConnectionUrl(device.connectionProperties)
     fun open() = synchronized(lock) { close(); connection = DefaultPlcDriverManager().getConnection(url()).also { it.connect() } }
     override val connected get() = synchronized(lock) { connection?.isConnected == true }
     override suspend fun read(points: List<PointDefinition>): List<PointValue> = withContext(Dispatchers.IO) {
         points.map { point -> val start = Instant.now(); runCatching { readOne(point) }.fold(
             { PointValue(device.id, point.id, start, Instant.now(), it, ValueQuality.GOOD, "s7comm") },
-            { PointValue(device.id, point.id, start, Instant.now(), null, if (it is IllegalArgumentException) ValueQuality.BAD_CONFIGURATION else ValueQuality.OFFLINE, "s7comm", it.message) }) }
+            { PointValue(device.id, point.id, start, Instant.now(), null, quality(it), "s7comm", it.message) }) }
     }
     private fun readOne(point: PointDefinition): Any? = synchronized(lock) {
-        val tag = s7Tag(point); val c = connection ?: throw IllegalStateException("S7 连接未建立")
-        try { c.readRequestBuilder().addTagAddress("v", tag).build().execute().get(timeout, java.util.concurrent.TimeUnit.MILLISECONDS).getObject("v") }
-        catch (e: Exception) { close(); open(); throw e }
+        val tag = s7Tag(point)
+        retryOnce {
+            val response = requireConnection().readRequestBuilder().addTagAddress("v", tag).build().execute().get(timeout, TimeUnit.MILLISECONDS)
+            if (response.getResponseCode("v") != PlcResponseCode.OK) throw S7ProtocolException("S7 读取失败: ${response.getResponseCode("v")}")
+            response.getObject("v")
+        }
     }
     override suspend fun write(writes: List<PointWrite>): List<WriteResult> = withContext(Dispatchers.IO) {
-        writes.map { write -> if (write.point.access == ai.moying.iview.core.device.PointAccess.READ_ONLY) WriteResult(false, "点位只读") else runCatching { synchronized(lock) { val c=connection?:throw IllegalStateException("S7 连接未建立"); c.writeRequestBuilder().addTagAddress("v", s7Tag(write.point), write.value).build().execute().get(timeout, java.util.concurrent.TimeUnit.MILLISECONDS) } }.fold({ WriteResult(true) }, { WriteResult(false, it.message) }) }
+        writes.map { write -> if (write.point.access == ai.moying.iview.core.device.PointAccess.READ_ONLY) WriteResult(false, "点位只读") else runCatching { synchronized(lock) { retryOnce { val response = requireConnection().writeRequestBuilder().addTagAddress("v", s7Tag(write.point), write.value).build().execute().get(timeout, TimeUnit.MILLISECONDS); if (response.getResponseCode("v") != PlcResponseCode.OK) throw S7ProtocolException("S7 写入失败: ${response.getResponseCode("v")}") } } }.fold({ WriteResult(true) }, { WriteResult(false, it.message) }) }
     }
+    private fun requireConnection() = connection ?: throw IllegalStateException("S7 连接未建立")
+    private fun <T> retryOnce(block: () -> T): T = try { block() } catch (first: S7ProtocolException) { throw first } catch (first: Exception) { close(); open(); block() }
+    private fun quality(error: Throwable) = when (error) { is IllegalArgumentException -> ValueQuality.BAD_CONFIGURATION; is TimeoutException, is SocketTimeoutException -> ValueQuality.TIMEOUT; is S7ProtocolException -> ValueQuality.BAD_RESPONSE; else -> ValueQuality.OFFLINE }
     override fun close() = synchronized(lock) { runCatching { connection?.close() }; connection=null }
+}
+
+private class S7ProtocolException(message: String) : RuntimeException(message)
+
+internal fun s7ConnectionUrl(values: Map<String, String>): String {
+    val host = (values["host"] ?: values["ip_address"]).orEmpty().trim()
+    val port = values["port"]?.toIntOrNull() ?: 102
+    val rack = values["rack"]?.toIntOrNull() ?: 0
+    val slot = values["slot"]?.toIntOrNull() ?: 1
+    val timeout = values["timeout"]?.toIntOrNull() ?: 5000
+    val connectionType = values["connect_type"]?.toIntOrNull() ?: values["connectType"]?.toIntOrNull() ?: 1
+    val group = when (connectionType) { 2 -> "OS"; 3 -> "OTHERS"; else -> "PG_OR_PC" }
+    return "s7://$host:$port?remote-rack=$rack&remote-slot=$slot&remote-device-group=$group&read-timeout=$timeout&tcp.default-timeout=$timeout&tcp.keep-alive=true"
 }
 
 internal fun s7Tag(point: PointDefinition, defaultArea: String = "DB", defaultDb: Int = 1): String {

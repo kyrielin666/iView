@@ -11,7 +11,7 @@
 ## 项目特点
 
 - 前后端独立部署：JVM 后端与纯 Web 前端完全分离。
-- 原生 JVM 协议驱动：已实现 Modbus TCP 基础读写、批量采集、超时与重连。
+- 原生 JVM 协议驱动：已实现 Modbus TCP/RTU、三菱 MC 3E、Siemens S7 和 OPC UA 的读写、诊断与重连。
 - 工业数据闭环：设备采集、历史数据、告警、控制、生产记录、班次与 OEE。
 - 数据看板链路：PostgreSQL 数据源 → 安全 SQL 数据集 → 已发布数据模型 → 看板组件。
 - 低代码文档：支持画布、组件、变量、条件样式、交互、发布快照和模板导入导出。
@@ -27,7 +27,7 @@ iView-frontend
                          ▼
 iView JVM Backend
   ├─ 设备目录、采集、控制、告警与推送
-  ├─ 协议 SPI 与原生 Modbus TCP 驱动
+  ├─ 协议 SPI 与五种原生 JVM 工业协议驱动
   ├─ 数据源、数据集、数据模型与安全查询
   ├─ 看板文档、快照、模板与运行时数据绑定
   └─ 机台状态、生产计划、产量与 OEE
@@ -43,7 +43,7 @@ iView JVM Backend
 
 - 设备组、设备模板、采集点和控制点管理
 - 设备连接测试、诊断、会话复用、超时与重连
-- Modbus TCP 采集、单点/多目标控制及控制日志
+- Modbus TCP/RTU、三菱 MC 3E、Siemens S7 和 OPC UA 采集与控制
 - 实时值、历史采样、设备统计和采集调度
 - HTTP / MQTT 推送、重试、队列状态与投递日志
 - 设备异常/恢复告警、分类规则和记录清理
@@ -89,7 +89,6 @@ cd iView
 
 - 后端 API：`http://localhost:8080`
 - 健康检查：`http://localhost:8080/actuator/health`
-- 能力清单：`http://localhost:8080/api/v1/platform/capabilities`
 
 开发环境默认使用本地 H2 文件；生产环境通过环境变量配置 PostgreSQL。数据源密码使用 AES-GCM 加密保存，生产环境必须设置固定的 `IVIEW_DATASOURCE_SECRET`。
 
@@ -112,6 +111,8 @@ modules/protocol-spi           协议驱动统一接口
 modules/protocol-modbus-tcp    原生 JVM Modbus TCP 驱动
 modules/protocol-modbus-rtu    原生 JVM Modbus RTU 串口驱动
 modules/protocol-mitsubishi-mc3e 原生 JVM 三菱 MC 3E TCP 驱动
+modules/protocol-s7            基于 PLC4X 的 Siemens S7 TCP 驱动
+modules/protocol-opcua         基于 Eclipse Milo 的 OPC UA 客户端驱动
 modules/device                 设备目录领域逻辑
 modules/collector              采集编排与会话管理
 modules/telemetry              原始点位采样
@@ -136,7 +137,7 @@ docs                           架构与 API 文档
 
 ## 后续方向
 
-- 继续扩展三菱 MC 4E/A1E、S7、OPC UA、FINS、FOCAS 等协议
+- 继续扩展三菱 MC 4E/A1E、FINS、FOCAS，并完善 OPC UA 证书安全端点
 - 完成身份认证、RBAC、部门、菜单与审计日志
 - 增加 MongoDB、CSV/文件和 HTTP 数据源
 - 完善拖拽式图层编辑、完整图表组件库与响应式发布运行时
@@ -154,5 +155,7 @@ docs                           架构与 API 文档
 - [Modbus TCP](docs/protocols/modbus-tcp.md)
 - [Modbus RTU](docs/protocols/modbus-rtu.md)
 - [三菱 MC 3E](docs/protocols/mitsubishi-mc3e.md)
+- [Siemens S7](docs/protocols/s7.md)
+- [OPC UA](docs/protocols/opcua.md)
 
 如果你在寻找一套可裁剪、可私有部署、能继续扩展工业协议和行业组件的轻量化看板底座，iView 正朝这个方向持续完善。

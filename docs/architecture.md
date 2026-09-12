@@ -73,4 +73,5 @@ measured workloads demonstrate a need; public domain contracts must not depend o
 
 The legacy systems remain runnable only as acceptance references during construction. A capability
 is migrated by documenting its behavior, implementing it in iView, testing normal and failure paths,
-and recording evidence in the parity matrix. The target deployment contains no legacy Go process.
+and recording release acceptance evidence outside this public repository. The target deployment
+contains no legacy Go process.
