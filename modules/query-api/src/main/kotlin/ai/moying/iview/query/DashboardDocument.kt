@@ -17,6 +17,8 @@ data class DashboardComponent(
 )
 data class DashboardDocument(
     val version: Int = 1, val layoutMode: DashboardLayoutMode = DashboardLayoutMode.GRID, val canvas: DashboardCanvas = DashboardCanvas(),
+    /** 0 disables managed data refresh; otherwise the browser refreshes bound models at this interval. */
+    val refreshIntervalMs: Int = 5_000,
     val variables: List<DashboardVariable> = emptyList(), val components: List<DashboardComponent> = emptyList(),
 )
 
@@ -24,6 +26,7 @@ class DashboardDocumentValidator(private val modelById: (Long) -> DataModel) {
     fun validate(document: DashboardDocument, defaultModelId: Long? = null): DashboardDocument {
         if (document.version != 1) throw DashboardValidationException("暂不支持的看板文档版本: ${document.version}")
         if (document.canvas.width !in 320..7680 || document.canvas.height !in 240..4320) throw DashboardValidationException("画布尺寸超出支持范围")
+        if (document.refreshIntervalMs !in 0..3_600_000 || (document.refreshIntervalMs != 0 && document.refreshIntervalMs < 1_000)) throw DashboardValidationException("看板刷新间隔必须为 0（关闭）或 1000 到 3600000 毫秒")
         if (document.components.size > 200) throw DashboardValidationException("单个看板最多200个组件")
         if (document.variables.size > 50) throw DashboardValidationException("单个看板最多50个动态变量")
         if (document.variables.map { it.name }.toSet().size != document.variables.size || document.variables.any { !variableName.matches(it.name) }) throw DashboardValidationException("变量名必须以字母或下划线开头，仅包含字母、数字和下划线且不能重复")

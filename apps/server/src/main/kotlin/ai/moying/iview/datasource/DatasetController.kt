@@ -37,6 +37,10 @@ class DatasetCopyRequest { var name: String = "" }
 class DatasetMoveRequest { var folderId: Long? = null }
 class DatasetFolderRequest { var name: String = ""; var parentId: Long? = null; var description: String? = null }
 class DatasetVariablesRequest { var variables: Map<String, String> = emptyMap() }
+data class DatasetLineageField(
+    val outputField: String, val sourceCatalog: String?, val sourceSchema: String?, val sourceTable: String?, val sourceField: String?, val confidence: String,
+)
+data class DatasetLineage(val datasetId: Long, val fields: List<DatasetLineageField>, val note: String)
 
 @RestController
 @RequestMapping("/api/v1/datasets")
@@ -71,6 +75,23 @@ class DatasetController(private val datasets: DatasetService, private val source
                 val meta = rs.metaData; (1..meta.columnCount).map { SchemaColumn(meta.getColumnLabel(it), meta.getColumnTypeName(it), meta.isNullable(it) != 0) }
             } }
         })
+    }
+    @PostMapping("/{id}/lineage") fun lineage(@PathVariable id: Long, @RequestBody(required = false) request: DatasetVariablesRequest?): ApiResponse<DatasetLineage> {
+        val dataset = datasets.get(id); val credential = sources.credential(dataset.sourceId)
+        val fields = DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { connection ->
+            val bound = DatasetSql.bindVariables(DatasetSql.schemaQuery(dataset.sql), request?.variables ?: emptyMap())
+            connection.prepareStatement(bound.sql).use { statement ->
+                bound.values.forEachIndexed { index, value -> statement.setString(index + 1, value) }
+                statement.executeQuery().use { rs ->
+                    val meta = rs.metaData; (1..meta.columnCount).map { index ->
+                        val table = meta.getTableName(index).takeIf { !it.isNullOrBlank() }
+                        val field = meta.getColumnName(index).takeIf { !it.isNullOrBlank() }
+                        DatasetLineageField(meta.getColumnLabel(index), meta.getCatalogName(index).takeIf { !it.isNullOrBlank() }, meta.getSchemaName(index).takeIf { !it.isNullOrBlank() }, table, field, if (table != null && field != null) "JDBC_METADATA" else "DERIVED_OR_DRIVER_UNAVAILABLE")
+                    }
+                }
+            }
+        }
+        return ApiResponse.success(DatasetLineage(dataset.id, fields, "字段来源由 JDBC ResultSet 元数据提供；表达式、聚合、跨库视图或驱动未返回来源时会标记为派生或不可用。"))
     }
     @PostMapping("/{id}/explain") fun explain(@PathVariable id: Long, @RequestBody(required = false) request: DatasetVariablesRequest?): ApiResponse<List<String>> {
         val dataset = datasets.get(id); val credential = sources.credential(dataset.sourceId)

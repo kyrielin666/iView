@@ -57,4 +57,12 @@ class DashboardDocumentValidatorTest {
         assertEquals(repeated, validator.validate(repeated))
         assertFailsWith<DashboardValidationException> { validator.validate(DashboardDocument(components = listOf(DashboardComponent("metric", "metric", 0, 0, 1, 1, repeat = DashboardRepeatConfig(childIds = listOf("missing")))))) }
     }
+
+    @Test fun `managed dashboard refresh interval is bounded`() {
+        val validator = DashboardDocumentValidator { DataModel(it, 1, "m", "", DataModelStatus.PUBLISHED, 1, 1, Instant.EPOCH, Instant.EPOCH) }
+        assertEquals(5_000, validator.validate(DashboardDocument()).refreshIntervalMs)
+        assertEquals(0, validator.validate(DashboardDocument(refreshIntervalMs = 0)).refreshIntervalMs)
+        assertFailsWith<DashboardValidationException> { validator.validate(DashboardDocument(refreshIntervalMs = 500)) }
+        assertFailsWith<DashboardValidationException> { validator.validate(DashboardDocument(refreshIntervalMs = 3_600_001)) }
+    }
 }

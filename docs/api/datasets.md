@@ -11,6 +11,7 @@
 | `PUT /api/v1/datasets/{id}/folder` | 移动到 `folder_id`；传 `null` 回到根目录 |
 | `POST /api/v1/datasets/{id}/preview` | 用关联数据源执行受限预览查询；请求体可传 `max_rows`、`variables` |
 | `POST /api/v1/datasets/{id}/schema` | 读取结果字段结构，不取业务数据；请求体传 `variables` |
+| `POST /api/v1/datasets/{id}/lineage` | 读取字段级 JDBC 元数据血缘；请求体传 `variables` |
 | `POST /api/v1/datasets/{id}/explain` | 读取 PostgreSQL JSON 执行计划；请求体传 `variables` |
 | `POST /api/v1/datasets/{id}/export` | 执行受限 SQL 并下载最多 10,000 行 CSV；请求体传 `variables` |
 
@@ -27,4 +28,6 @@
 }
 ```
 
-数据集创建和更新时都会校验 SQL；预览时还会再次施加默认 1000、最大 10000 行的行数上限，已有字面量 `LIMIT` 也会被收紧。SQL 中的 `{{变量名}}` 在预览、结构读取、Explain 和导出时都会转为 JDBC 参数，不会通过字符串拼接写入查询。Explain 仅包装该已保存的受限 SQL，不能注入任意命令。导出统一以最多 10,000 行 CSV 返回；字段血缘尚未迁移。
+数据集创建和更新时都会校验 SQL；预览时还会再次施加默认 1000、最大 10000 行的行数上限，已有字面量 `LIMIT` 也会被收紧。SQL 中的 `{{变量名}}` 在预览、结构读取、字段血缘、Explain 和导出时都会转为 JDBC 参数，不会通过字符串拼接写入查询。Explain 仅包装该已保存的受限 SQL，不能注入任意命令。导出统一以最多 10,000 行 CSV 返回。
+
+字段血缘由 JDBC `ResultSetMetaData` 返回的 catalog、schema、table 和 column 构成。普通表字段会标记为 `JDBC_METADATA`；表达式、聚合、跨库视图，或 JDBC 驱动未提供来源时会标记为 `DERIVED_OR_DRIVER_UNAVAILABLE`，不会伪造精确血缘。
