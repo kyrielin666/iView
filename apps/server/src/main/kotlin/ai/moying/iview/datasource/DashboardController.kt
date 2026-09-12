@@ -3,15 +3,17 @@ package ai.moying.iview.datasource
 import ai.moying.iview.common.ApiResponse
 import ai.moying.iview.query.*
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.*
 import com.fasterxml.jackson.databind.ObjectMapper
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
 class DashboardRequest { var folderId:Long?=null;var modelId:Long?=null;var name:String="";var description:String?=null;var contentJson:String?=null }
 class DashboardFolderRequest { var name:String="";var parentId:Long?=null }
 class DashboardImportRequest { var export: DashboardExport? = null; var folderId: Long? = null; var name: String? = null }
 data class DashboardExport(val format: String = "iview-dashboard", val version: Int = 1, val name: String, val description: String, val modelId: Long?, val document: DashboardDocument)
 @RestController @RequestMapping("/api/v1/dashboards")
-class DashboardController(private val dashboards:DashboardService, private val documents:DashboardDocumentValidator, private val objectMapper:ObjectMapper){
+class DashboardController(private val dashboards:DashboardService, private val documents:DashboardDocumentValidator, private val objectMapper:ObjectMapper, private val realtime:DashboardRealtimeHub){
  @GetMapping fun list(@RequestParam(name="folder_id",required=false) folderId:Long?)=ApiResponse.success(dashboards.list(folderId).map(::view))
  @GetMapping("/{id}") fun get(@PathVariable id:Long)=ApiResponse.success(view(dashboards.get(id)))
  @PostMapping @ResponseStatus(HttpStatus.CREATED) fun create(@RequestBody r:DashboardRequest)=ApiResponse.success(view(dashboards.create(r.draft())))
@@ -19,13 +21,14 @@ class DashboardController(private val dashboards:DashboardService, private val d
  @DeleteMapping("/{id}") fun delete(@PathVariable id:Long):ApiResponse<Nothing>{dashboards.delete(id);return ApiResponse.success()}
  @PutMapping("/{id}/document") fun document(@PathVariable id: Long, @RequestBody document: DashboardDocument): ApiResponse<DashboardDocument> {
   val dashboard = dashboards.get(id); val validated = documents.validate(document, dashboard.modelId)
-  dashboards.replaceContent(id, objectMapper.writeValueAsString(validated)); return ApiResponse.success(validated)
+  dashboards.replaceContent(id, objectMapper.writeValueAsString(validated)); realtime.notifyChanged(id, "document-updated"); return ApiResponse.success(validated)
  }
  @GetMapping("/{id}/preview") fun preview(@PathVariable id: Long) = ApiResponse.success(readDocument(dashboards.get(id).contentJson))
  @PostMapping("/{id}/publish") fun publish(@PathVariable id:Long): ApiResponse<Map<String, Any?>> {
   val dashboard = dashboards.get(id); documents.validate(readDocument(dashboard.contentJson), dashboard.modelId)
-  return ApiResponse.success(view(dashboards.publish(id)))
+  val published = dashboards.publish(id); realtime.notifyChanged(id, "published"); return ApiResponse.success(view(published))
  }
+ @GetMapping("/{id}/subscription", produces = [MediaType.TEXT_EVENT_STREAM_VALUE]) fun subscription(@PathVariable id: Long): SseEmitter { dashboards.get(id); return realtime.subscribe(id) }
  @GetMapping("/{id}/published") fun published(@PathVariable id: Long) = ApiResponse.success(mapOf("snapshot_id" to dashboards.published(id).id, "document" to readDocument(dashboards.published(id).contentJson)))
  @GetMapping("/{id}/snapshots") fun snapshots(@PathVariable id:Long)=ApiResponse.success(dashboards.snapshots(id).map { mapOf("id" to it.id, "version" to it.version, "content_json" to it.contentJson, "model_id" to it.modelId, "created_at" to it.createdAt) })
  @GetMapping("/{id}/export") fun export(@PathVariable id: Long): ApiResponse<DashboardExport> {
