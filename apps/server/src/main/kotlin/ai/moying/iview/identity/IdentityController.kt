@@ -56,10 +56,11 @@ class IdentityService(
     fun refresh(raw: String): TokenPair {
         val hash = sha256(raw); val row = jdbc.query("SELECT user_id FROM iview_refresh_token WHERE token_hash=? AND revoked_at IS NULL AND expires_at>?", { rs, _ -> rs.getLong(1) }, hash, Instant.now()).firstOrNull() ?: throw AuthenticationException("刷新令牌无效或已过期")
         jdbc.update("UPDATE iview_refresh_token SET revoked_at=? WHERE token_hash=?", Instant.now(), hash)
-        return issue(findById(row)?.view() ?: throw AuthenticationException("用户不存在"))
+        val user = findById(row)?.takeIf { it.enabled } ?: throw AuthenticationException("用户不存在或已停用")
+        return issue(user.view())
     }
     fun logout(raw: String) { if (raw.isNotBlank()) jdbc.update("UPDATE iview_refresh_token SET revoked_at=? WHERE token_hash=?", Instant.now(), sha256(raw)) }
-    fun current(header: String?): AuthUser { val token = header?.removePrefix("Bearer ")?.trim().orEmpty(); val fields = decode(token); return findById(fields[0].toLongOrNull() ?: throw AuthenticationException("访问令牌无效"))?.view() ?: throw AuthenticationException("用户不存在") }
+    fun current(header: String?): AuthUser { val token = header?.removePrefix("Bearer ")?.trim().orEmpty(); val fields = decode(token); return findById(fields[0].toLongOrNull() ?: throw AuthenticationException("访问令牌无效"))?.takeIf { it.enabled }?.view() ?: throw AuthenticationException("用户不存在或已停用") }
     fun permitted(user: AuthUser, method: String, path: String): Boolean {
         val permissions = jdbc.query("SELECT p.permission_code FROM iview_permission p JOIN iview_role_permission rp ON rp.permission_id=p.id JOIN iview_user_role ur ON ur.role_id=rp.role_id WHERE ur.user_id=?", { rs, _ -> rs.getString(1) }, user.id)
         return "*" in permissions || "$method:$path" in permissions

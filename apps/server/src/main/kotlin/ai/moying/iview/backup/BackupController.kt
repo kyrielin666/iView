@@ -1,6 +1,8 @@
 package ai.moying.iview.backup
 
 import ai.moying.iview.common.ApiResponse
+import ai.moying.iview.identity.AdminGuard
+import jakarta.servlet.http.HttpServletRequest
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
@@ -20,11 +22,11 @@ class BackupException(message: String) : RuntimeException(message)
 
 @RestController
 @RequestMapping("/api/v1/backups")
-class BackupController(private val backups: BackupService) {
-    @GetMapping fun list() = ApiResponse.success(backups.list())
-    @PostMapping @ResponseStatus(HttpStatus.CREATED) fun create() = ApiResponse.success(backups.create())
-    @PostMapping("/{name}/validate") fun validate(@PathVariable name: String) = ApiResponse.success(backups.validate(name))
-    @PostMapping("/restore") fun restore(@RequestBody request: RestoreRequest): ApiResponse<Nothing> { backups.restore(request.name, request.confirmation); return ApiResponse.success() }
+class BackupController(private val backups: BackupService, private val guard: AdminGuard) {
+    @GetMapping fun list(request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(backups.list()) }
+    @PostMapping @ResponseStatus(HttpStatus.CREATED) fun create(request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(backups.create()) }
+    @PostMapping("/{name}/validate") fun validate(@PathVariable name: String, request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(backups.validate(name)) }
+    @PostMapping("/restore") fun restore(@RequestBody body: RestoreRequest, request: HttpServletRequest): ApiResponse<Nothing> { guard.require(request); backups.restore(body.name, body.confirmation); return ApiResponse.success() }
 }
 
 @Service

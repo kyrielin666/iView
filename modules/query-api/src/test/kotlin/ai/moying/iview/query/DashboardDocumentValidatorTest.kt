@@ -76,6 +76,12 @@ class DashboardDocumentValidatorTest {
         assertFailsWith<DashboardValidationException> { validator.validate(DashboardDocument(components = deep)) }
     }
 
+    @Test fun `industrial indicator components are supported`() {
+        val validator = DashboardDocumentValidator { DataModel(it, 1, "m", "", DataModelStatus.PUBLISHED, 1, 1, Instant.EPOCH, Instant.EPOCH) }
+        val components = listOf("gauge", "progress", "status", "clock").mapIndexed { index, type -> DashboardComponent(type, type, index, 0, 100, 80, modelId = if (type == "clock") null else 1, fields = if (type == "clock") emptyList() else listOf("value")) }
+        assertEquals(components, validator.validate(DashboardDocument(components = components)).components)
+    }
+
     @Test fun `managed dashboard refresh interval is bounded`() {
         val validator = DashboardDocumentValidator { DataModel(it, 1, "m", "", DataModelStatus.PUBLISHED, 1, 1, Instant.EPOCH, Instant.EPOCH) }
         assertEquals(5_000, validator.validate(DashboardDocument()).refreshIntervalMs)
