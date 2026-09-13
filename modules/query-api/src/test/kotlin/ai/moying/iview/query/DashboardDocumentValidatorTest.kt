@@ -58,6 +58,24 @@ class DashboardDocumentValidatorTest {
         assertFailsWith<DashboardValidationException> { validator.validate(DashboardDocument(components = listOf(DashboardComponent("metric", "metric", 0, 0, 1, 1, repeat = DashboardRepeatConfig(childIds = listOf("missing")))))) }
     }
 
+    @Test fun `nested repeat containers are bounded and cannot form cycles`() {
+        val published = DataModel(1, 1, "m", "", DataModelStatus.PUBLISHED, 1, 1, Instant.EPOCH, Instant.EPOCH)
+        val validator = DashboardDocumentValidator { published }
+        val leaf = DashboardComponent("leaf", "metric", 0, 0, 1, 1, modelId = 1, fields = listOf("value"))
+        val inner = DashboardComponent("inner", "container", 0, 0, 2, 2, modelId = 1, repeat = DashboardRepeatConfig(childIds = listOf("leaf")))
+        val outer = DashboardComponent("outer", "container", 0, 0, 4, 3, modelId = 1, repeat = DashboardRepeatConfig(childIds = listOf("inner")))
+        assertEquals(listOf(outer, inner, leaf), validator.validate(DashboardDocument(components = listOf(outer, inner, leaf))).components)
+
+        val cyclicA = outer.copy(id = "a", repeat = DashboardRepeatConfig(childIds = listOf("b")))
+        val cyclicB = inner.copy(id = "b", repeat = DashboardRepeatConfig(childIds = listOf("a")))
+        assertFailsWith<DashboardValidationException> { validator.validate(DashboardDocument(components = listOf(cyclicA, cyclicB))) }
+
+        val deep = (1..7).map { index ->
+            DashboardComponent("c$index", "container", 0, 0, 1, 1, modelId = 1, repeat = DashboardRepeatConfig(childIds = listOf(if (index == 7) "leaf" else "c${index + 1}")))
+        } + leaf
+        assertFailsWith<DashboardValidationException> { validator.validate(DashboardDocument(components = deep)) }
+    }
+
     @Test fun `managed dashboard refresh interval is bounded`() {
         val validator = DashboardDocumentValidator { DataModel(it, 1, "m", "", DataModelStatus.PUBLISHED, 1, 1, Instant.EPOCH, Instant.EPOCH) }
         assertEquals(5_000, validator.validate(DashboardDocument()).refreshIntervalMs)

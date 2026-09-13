@@ -50,7 +50,23 @@ class DashboardDocumentValidator(private val modelById: (Long) -> DataModel) {
             validateConditionalStyles(component)
             validateInteractions(component)
         }
+        validateRepeatGraph(document.components)
         return document
+    }
+
+    private fun validateRepeatGraph(components: List<DashboardComponent>) {
+        val byId = components.associateBy { it.id }
+        val visiting = linkedSetOf<String>()
+        fun visit(id: String, depth: Int) {
+            if (depth > 5) throw DashboardValidationException("重复容器最多嵌套5层: $id")
+            if (id in visiting) throw DashboardValidationException("重复容器不能形成循环引用: ${(visiting + id).joinToString(" -> ")}")
+            visiting += id
+            byId[id]?.repeat?.childIds.orEmpty().forEach { childId ->
+                if (byId[childId]?.type == "container") visit(childId, depth + 1)
+            }
+            visiting -= id
+        }
+        components.filter { it.type == "container" && it.repeat != null }.forEach { visit(it.id, 1) }
     }
 
     private fun validateConditionalStyles(component: DashboardComponent) {
