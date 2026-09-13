@@ -30,4 +30,4 @@
 
 数据集创建和更新时都会校验 SQL；预览时还会再次施加默认 1000、最大 10000 行的行数上限，已有字面量 `LIMIT` 也会被收紧。SQL 中的 `{{变量名}}` 在预览、结构读取、字段血缘、Explain 和导出时都会转为 JDBC 参数，不会通过字符串拼接写入查询。Explain 仅包装该已保存的受限 SQL，不能注入任意命令。导出统一以最多 10,000 行 CSV 返回。
 
-字段血缘由 JDBC `ResultSetMetaData` 返回的 catalog、schema、table 和 column 构成。普通表字段会标记为 `JDBC_METADATA`；表达式、聚合、跨库视图，或 JDBC 驱动未提供来源时会标记为 `DERIVED_OR_DRIVER_UNAVAILABLE`，不会伪造精确血缘。
+字段血缘由 JDBC `ResultSetMetaData` 返回的 catalog、schema、table 和 column 构成。响应除兼容的 `fields` 明细外，还包含可直接可视化的 `nodes`、`edges`，以及输出字段数、物理来源字段数、来源表数和派生字段数 `summary`。普通表字段会标记为 `JDBC_METADATA`；表达式、聚合、跨库视图，或 JDBC 驱动未提供来源时会标记为 `DERIVED_OR_DRIVER_UNAVAILABLE`，不会伪造精确血缘。

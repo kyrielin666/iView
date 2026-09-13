@@ -26,6 +26,8 @@ data class CollectResultView(
     val values: List<CollectedPointView>,
     val error: String?,
     val duration: Long,
+    val attempts: Int,
+    val recovered: Boolean,
 )
 
 data class RealtimePointView(
@@ -143,6 +145,8 @@ class DeviceCollectionService(
         },
         result.error,
         result.duration.toMillis(),
+        result.attempts,
+        result.recovered,
     )
 
     private fun pointView(value: PointValue, name: String, code: String) = CollectedPointView(

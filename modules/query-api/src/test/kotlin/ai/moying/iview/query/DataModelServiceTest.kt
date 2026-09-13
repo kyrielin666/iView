@@ -3,6 +3,7 @@ package ai.moying.iview.query
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 class DataModelServiceTest {
     @Test fun `published model is marked drifted only when its schema changes`() {
@@ -19,6 +20,23 @@ class DataModelServiceTest {
         assertEquals(true, changed.changed)
         assertEquals(DataModelStatus.DRIFTED, changed.model.status)
         assertEquals(2, changed.schema.version)
+    }
+
+    @Test fun `publish plan reports breaking drift and rejects stale confirmation`() {
+        val sources = DataSourceService(SourceMemory(), PlainCipher())
+        sources.create(DataSourceDraft("s", DataSourceType.POSTGRESQL, "jdbc:postgresql://db/x", "u", "p"))
+        val service = DataModelService(ModelMemory(), DatasetService(DatasetMemory(), sources))
+        val model = service.create(DataModelDraft(1, "订单模型"))
+        service.sync(model.id, listOf(DataModelField("id", "BIGINT", false), DataModelField("remark", "VARCHAR", true)))
+        service.publish(model.id, 1)
+        service.sync(model.id, listOf(DataModelField("id", "VARCHAR", false), DataModelField("created_at", "TIMESTAMP", true)))
+
+        val plan = service.publishPlan(model.id)
+        assertEquals(2, plan.latestSchema.version)
+        assertEquals(2, plan.breakingChanges)
+        assertEquals(true, plan.requiresPublish)
+        assertFailsWith<DataModelValidationException> { service.publish(model.id, 1) }
+        assertEquals(DataModelStatus.PUBLISHED, service.publish(model.id, 2).status)
     }
 
     private class PlainCipher : DataSourceSecretCipher { override fun encrypt(plainText: String) = plainText; override fun decrypt(cipherText: String) = cipherText }

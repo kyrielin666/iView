@@ -27,6 +27,24 @@ data class DataModelSchema(
     val createdAt: Instant,
 )
 data class DataModelSyncResult(val model: DataModel, val schema: DataModelSchema, val changed: Boolean)
+enum class DataModelFieldChangeKind { ADDED, REMOVED, TYPE_CHANGED, NULLABILITY_CHANGED }
+data class DataModelFieldChange(
+    val field: String,
+    val kind: DataModelFieldChangeKind,
+    val previousType: String? = null,
+    val currentType: String? = null,
+    val previousNullable: Boolean? = null,
+    val currentNullable: Boolean? = null,
+    val breaking: Boolean = false,
+)
+data class DataModelPublishPlan(
+    val model: DataModel,
+    val latestSchema: DataModelSchema,
+    val publishedSchema: DataModelSchema?,
+    val changes: List<DataModelFieldChange>,
+    val breakingChanges: Int,
+    val requiresPublish: Boolean,
+)
 
 interface DataModelRepository {
     fun list(): List<DataModel>
@@ -66,9 +84,39 @@ class DataModelService(private val repository: DataModelRepository, private val 
         return DataModelSyncResult(requireNotNull(updated), schema, true)
     }
 
-    fun publish(id: Long): DataModel {
+    fun publishPlan(id: Long): DataModelPublishPlan {
+        val model = get(id)
         val schema = repository.latestSchema(id) ?: throw DataModelValidationException("数据模型至少需要一次字段同步才能发布")
+        val published = model.publishedSchemaVersion?.let { version -> repository.listSchemas(id).firstOrNull { it.version == version } }
+        val changes = schemaChanges(published?.fields.orEmpty(), schema.fields, published == null)
+        return DataModelPublishPlan(model, schema, published, changes, changes.count { it.breaking }, model.publishedSchemaVersion != schema.version)
+    }
+
+    fun publish(id: Long, expectedSchemaVersion: Int? = null): DataModel {
+        val plan = publishPlan(id)
+        if (expectedSchemaVersion != null && plan.latestSchema.version != expectedSchemaVersion) {
+            throw DataModelValidationException("字段版本已从 v$expectedSchemaVersion 更新为 v${plan.latestSchema.version}，请重新确认发布计划")
+        }
+        val schema = plan.latestSchema
         return repository.publish(id, schema.version) ?: throw DataModelNotFoundException("数据模型不存在: $id")
+    }
+
+    private fun schemaChanges(previous: List<DataModelField>, current: List<DataModelField>, firstPublish: Boolean): List<DataModelFieldChange> {
+        val before = previous.associateBy { it.name.lowercase() }
+        val after = current.associateBy { it.name.lowercase() }
+        return buildList {
+            current.forEach { field ->
+                val old = before[field.name.lowercase()]
+                if (old == null) add(DataModelFieldChange(field.name, DataModelFieldChangeKind.ADDED, currentType = field.type, currentNullable = field.nullable, breaking = false))
+                else {
+                    if (old.type != field.type) add(DataModelFieldChange(field.name, DataModelFieldChangeKind.TYPE_CHANGED, old.type, field.type, old.nullable, field.nullable, true))
+                    if (old.nullable != field.nullable) add(DataModelFieldChange(field.name, DataModelFieldChangeKind.NULLABILITY_CHANGED, old.type, field.type, old.nullable, field.nullable, old.nullable && !field.nullable))
+                }
+            }
+            if (!firstPublish) previous.filter { it.name.lowercase() !in after }.forEach { field ->
+                add(DataModelFieldChange(field.name, DataModelFieldChangeKind.REMOVED, previousType = field.type, previousNullable = field.nullable, breaking = true))
+            }
+        }
     }
 
     private fun normalize(draft: DataModelDraft) = draft.copy(name = draft.name.trim(), description = draft.description.trim()).also {

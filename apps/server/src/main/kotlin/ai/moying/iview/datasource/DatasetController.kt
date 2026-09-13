@@ -40,7 +40,13 @@ class DatasetVariablesRequest { var variables: Map<String, String> = emptyMap() 
 data class DatasetLineageField(
     val outputField: String, val sourceCatalog: String?, val sourceSchema: String?, val sourceTable: String?, val sourceField: String?, val confidence: String,
 )
-data class DatasetLineage(val datasetId: Long, val fields: List<DatasetLineageField>, val note: String)
+data class DatasetLineageNode(val id: String, val kind: String, val label: String)
+data class DatasetLineageEdge(val source: String, val target: String, val confidence: String)
+data class DatasetLineageSummary(val outputFields: Int, val sourceFields: Int, val sourceTables: Int, val derivedFields: Int)
+data class DatasetLineage(
+    val datasetId: Long, val fields: List<DatasetLineageField>, val nodes: List<DatasetLineageNode>, val edges: List<DatasetLineageEdge>,
+    val summary: DatasetLineageSummary, val note: String,
+)
 
 @RestController
 @RequestMapping("/api/v1/datasets")
@@ -91,7 +97,18 @@ class DatasetController(private val datasets: DatasetService, private val source
                 }
             }
         }
-        return ApiResponse.success(DatasetLineage(dataset.id, fields, "字段来源由 JDBC ResultSet 元数据提供；表达式、聚合、跨库视图或驱动未返回来源时会标记为派生或不可用。"))
+        val outputNodes = fields.map { DatasetLineageNode("output:${it.outputField}", "output", it.outputField) }
+        val sourceNodes = fields.mapNotNull { field -> field.sourceField?.let { source ->
+            val path = listOfNotNull(field.sourceCatalog, field.sourceSchema, field.sourceTable, source).joinToString(".")
+            DatasetLineageNode("source:$path", "source", path)
+        } }.distinctBy { it.id }
+        val edges = fields.mapNotNull { field -> field.sourceField?.let { source ->
+            val path = listOfNotNull(field.sourceCatalog, field.sourceSchema, field.sourceTable, source).joinToString(".")
+            DatasetLineageEdge("source:$path", "output:${field.outputField}", field.confidence)
+        } }
+        val tables = fields.mapNotNull { field -> field.sourceTable?.let { listOfNotNull(field.sourceCatalog, field.sourceSchema, it).joinToString(".") } }.toSet()
+        val summary = DatasetLineageSummary(fields.size, sourceNodes.size, tables.size, fields.count { it.sourceField == null })
+        return ApiResponse.success(DatasetLineage(dataset.id, fields, sourceNodes + outputNodes, edges, summary, "字段来源由 JDBC ResultSet 元数据提供；表达式、聚合、跨库视图或驱动未返回来源时会标记为派生或不可用。"))
     }
     @PostMapping("/{id}/explain") fun explain(@PathVariable id: Long, @RequestBody(required = false) request: DatasetVariablesRequest?): ApiResponse<List<String>> {
         val dataset = datasets.get(id); val credential = sources.credential(dataset.sourceId)

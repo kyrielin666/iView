@@ -67,6 +67,4 @@ request value may be an object keyed by target key/name or an array in target or
 | GET | `/api/v1/devices/statistics` | Device, enabled and recently-online counts |
 | GET | `/api/v1/collector/sessions` | Active JVM protocol-session status |
 
-Connection testing, diagnosis, manual collection, realtime values, raw history, and control writes
-currently support the native JVM Modbus TCP driver. Hardware acceptance is still required before
-production use.
+连接测试、诊断、手动采集、实时值、原始历史和控制写入已覆盖 Modbus TCP/RTU、三菱 MC 3E、Siemens S7 与 OPC UA。驱动内部重连仍失败，或驱动将错误映射为 `TIMEOUT`/`OFFLINE` 点位质量时，采集引擎会关闭旧会话、短暂退避后重新建连并再采集一次；API 的 `attempts` 与 `recovered` 字段用于区分直接成功、重连恢复和最终失败。投产前仍需按现场 PLC、串口转换器和网络条件完成硬件验收及持续压力测试。
