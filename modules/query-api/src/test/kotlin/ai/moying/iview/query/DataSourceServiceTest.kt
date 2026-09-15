@@ -20,6 +20,14 @@ class DataSourceServiceTest {
         assertFailsWith<DataSourceValidationException> { service.create(DataSourceDraft("x", DataSourceType.POSTGRESQL, "jdbc:h2:mem:x", "sa", "")) }
     }
 
+    @Test fun `supports non relational endpoints without inventing database credentials`() {
+        val service = DataSourceService(FakeRepository(), ReverseCipher())
+        val http = service.create(DataSourceDraft("MES API", DataSourceType.HTTP, "https://example.com/data", ""))
+        assertEquals(DataSourceType.HTTP, http.type)
+        assertEquals("", service.credential(http.id).password)
+        assertFailsWith<DataSourceValidationException> { service.create(DataSourceDraft("越界文件", DataSourceType.FILE, "../secret.csv", "")) }
+    }
+
     private class ReverseCipher : DataSourceSecretCipher {
         override fun encrypt(plainText: String) = plainText.reversed()
         override fun decrypt(cipherText: String) = cipherText.reversed()
@@ -34,7 +42,7 @@ class DataSourceServiceTest {
         }
         override fun update(id: Long, draft: DataSourceDraft, passwordCipher: String?): DataSource? {
             val current = record ?: return null
-            val source = current.source.copy(name = draft.name, jdbcUrl = draft.jdbcUrl, username = draft.username, description = draft.description)
+            val source = current.source.copy(name = draft.name, type = draft.type, jdbcUrl = draft.jdbcUrl, username = draft.username, description = draft.description)
             record = StoredDataSource(source, passwordCipher ?: current.passwordCipher); return source
         }
         override fun delete(id: Long) = false

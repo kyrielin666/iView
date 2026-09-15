@@ -1,14 +1,11 @@
 package ai.moying.iview.datasource
 
 import ai.moying.iview.common.ApiResponse
-import ai.moying.iview.query.DataSourceService
 import ai.moying.iview.query.Dataset
 import ai.moying.iview.query.DatasetDraft
 import ai.moying.iview.query.DatasetFolder
 import ai.moying.iview.query.DatasetFolderDraft
 import ai.moying.iview.query.DatasetService
-import ai.moying.iview.query.DatasetSql
-import ai.moying.iview.query.SafeSql
 import org.springframework.http.HttpStatus
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
@@ -23,7 +20,6 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
-import java.sql.DriverManager
 
 class DatasetRequest {
     var sourceId: Long? = null
@@ -50,7 +46,7 @@ data class DatasetLineage(
 
 @RestController
 @RequestMapping("/api/v1/datasets")
-class DatasetController(private val datasets: DatasetService, private val sources: DataSourceService) {
+class DatasetController(private val datasets: DatasetService, private val execution: DataSourceExecutionService) {
     @GetMapping fun list(@RequestParam(name = "source_id", required = false) sourceId: Long?, @RequestParam(name = "folder_id", required = false) folderId: Long?) = ApiResponse.success(datasets.list(sourceId, folderId).map(::view))
     @GetMapping("/{id}") fun get(@PathVariable id: Long) = ApiResponse.success(view(datasets.get(id)))
     @PostMapping @ResponseStatus(HttpStatus.CREATED) fun create(@RequestBody request: DatasetRequest) = ApiResponse.success(view(datasets.create(request.draft())))
@@ -60,42 +56,22 @@ class DatasetController(private val datasets: DatasetService, private val source
     @PutMapping("/{id}/folder") fun move(@PathVariable id: Long, @RequestBody request: DatasetMoveRequest) = ApiResponse.success(view(datasets.move(id, request.folderId)))
     @PostMapping("/{id}/preview") fun preview(@PathVariable id: Long, @RequestBody request: DatasetPreviewRequest): ApiResponse<SqlResult> {
         val dataset = datasets.get(id)
-        val credential = sources.credential(dataset.sourceId)
-        val bound = DatasetSql.bindVariables(SafeSql.limit(dataset.sql, request.maxRows ?: 1_000), request.variables)
-        return ApiResponse.success(DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { execute(it, bound.sql, bound.values) })
+        return ApiResponse.success(execution.queryDataset(dataset, request.maxRows ?: 1_000, request.variables))
     }
     @PostMapping("/{id}/export") fun export(@PathVariable id: Long, @RequestBody(required = false) request: DatasetVariablesRequest?): ResponseEntity<ByteArray> {
-        val dataset = datasets.get(id); val credential = sources.credential(dataset.sourceId)
-        val bound = DatasetSql.bindVariables(SafeSql.limit(dataset.sql, 10_000), request?.variables ?: emptyMap())
-        val result = DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { execute(it, bound.sql, bound.values) }
+        val dataset = datasets.get(id)
+        val result = execution.queryDataset(dataset, 10_000, request?.variables ?: emptyMap())
         val csv = ai.moying.iview.query.CsvExport.render(result.columns.map { it.name }, result.rows).toByteArray(Charsets.UTF_8)
         return ResponseEntity.ok().header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=dataset-${dataset.id}.csv").contentType(MediaType.parseMediaType("text/csv;charset=UTF-8")).body(csv)
     }
     @PostMapping("/{id}/schema") fun schema(@PathVariable id: Long, @RequestBody(required = false) request: DatasetVariablesRequest?): ApiResponse<List<SchemaColumn>> {
-        val dataset = datasets.get(id); val credential = sources.credential(dataset.sourceId)
-        return ApiResponse.success(DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { connection ->
-            val bound = DatasetSql.bindVariables(DatasetSql.schemaQuery(dataset.sql), request?.variables ?: emptyMap())
-            connection.prepareStatement(bound.sql).use { statement ->
-                bound.values.forEachIndexed { index, value -> statement.setString(index + 1, value) }
-                statement.executeQuery().use { rs ->
-                val meta = rs.metaData; (1..meta.columnCount).map { SchemaColumn(meta.getColumnLabel(it), meta.getColumnTypeName(it), meta.isNullable(it) != 0) }
-            } }
-        })
+        val dataset = datasets.get(id)
+        return ApiResponse.success(execution.schema(dataset, request?.variables ?: emptyMap()))
     }
     @PostMapping("/{id}/lineage") fun lineage(@PathVariable id: Long, @RequestBody(required = false) request: DatasetVariablesRequest?): ApiResponse<DatasetLineage> {
-        val dataset = datasets.get(id); val credential = sources.credential(dataset.sourceId)
-        val fields = DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { connection ->
-            val bound = DatasetSql.bindVariables(DatasetSql.schemaQuery(dataset.sql), request?.variables ?: emptyMap())
-            connection.prepareStatement(bound.sql).use { statement ->
-                bound.values.forEachIndexed { index, value -> statement.setString(index + 1, value) }
-                statement.executeQuery().use { rs ->
-                    val meta = rs.metaData; (1..meta.columnCount).map { index ->
-                        val table = meta.getTableName(index).takeIf { !it.isNullOrBlank() }
-                        val field = meta.getColumnName(index).takeIf { !it.isNullOrBlank() }
-                        DatasetLineageField(meta.getColumnLabel(index), meta.getCatalogName(index).takeIf { !it.isNullOrBlank() }, meta.getSchemaName(index).takeIf { !it.isNullOrBlank() }, table, field, if (table != null && field != null) "JDBC_METADATA" else "DERIVED_OR_DRIVER_UNAVAILABLE")
-                    }
-                }
-            }
+        val dataset = datasets.get(id)
+        val fields = execution.lineage(dataset, request?.variables ?: emptyMap()).map { field ->
+            DatasetLineageField(field.outputField, field.sourceCatalog, field.sourceSchema, field.sourceTable, field.sourceField, field.confidence)
         }
         val outputNodes = fields.map { DatasetLineageNode("output:${it.outputField}", "output", it.outputField) }
         val sourceNodes = fields.mapNotNull { field -> field.sourceField?.let { source ->
@@ -108,17 +84,11 @@ class DatasetController(private val datasets: DatasetService, private val source
         } }
         val tables = fields.mapNotNull { field -> field.sourceTable?.let { listOfNotNull(field.sourceCatalog, field.sourceSchema, it).joinToString(".") } }.toSet()
         val summary = DatasetLineageSummary(fields.size, sourceNodes.size, tables.size, fields.count { it.sourceField == null })
-        return ApiResponse.success(DatasetLineage(dataset.id, fields, sourceNodes + outputNodes, edges, summary, "字段来源由 JDBC ResultSet 元数据提供；表达式、聚合、跨库视图或驱动未返回来源时会标记为派生或不可用。"))
+        return ApiResponse.success(DatasetLineage(dataset.id, fields, sourceNodes + outputNodes, edges, summary, "PostgreSQL 优先使用 JDBC 字段元数据；非关系型数据源按实际响应字段建立来源关系，复杂嵌套字段保留为 JSON。"))
     }
     @PostMapping("/{id}/explain") fun explain(@PathVariable id: Long, @RequestBody(required = false) request: DatasetVariablesRequest?): ApiResponse<List<String>> {
-        val dataset = datasets.get(id); val credential = sources.credential(dataset.sourceId)
-        return ApiResponse.success(DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { connection ->
-            val bound = DatasetSql.bindVariables(DatasetSql.explainQuery(dataset.sql), request?.variables ?: emptyMap())
-            connection.prepareStatement(bound.sql).use { statement ->
-                bound.values.forEachIndexed { index, value -> statement.setString(index + 1, value) }
-                statement.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getString(1) else null }.toList() }
-            }
-        })
+        val dataset = datasets.get(id)
+        return ApiResponse.success(execution.explain(dataset, request?.variables ?: emptyMap()))
     }
     private fun DatasetRequest.draft() = DatasetDraft(sourceId ?: 0, folderId, name, sql, description ?: "")
     private fun view(dataset: Dataset) = mapOf(

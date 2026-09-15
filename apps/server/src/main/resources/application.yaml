@@ -35,6 +35,11 @@ iview:
   data-source:
     # 开发默认值；生产环境必须通过 IVIEW_DATASOURCE_SECRET 覆盖，且不得变更已有值。
     secret: ${IVIEW_DATASOURCE_SECRET:iview-development-secret-change-me}
+  data-sources:
+    file-root: ${IVIEW_FILE_SOURCE_ROOT:./data/file-sources}
+    # 默认拦截回环、链路本地和内网 HTTP 地址，可信工业内网部署需显式开启。
+    http:
+      allow-private: ${IVIEW_HTTP_ALLOW_PRIVATE:false}
   auth:
     # 开发默认账号仅用于首次空库启动；生产环境必须通过环境变量覆盖这两个值。
     token-secret: ${IVIEW_AUTH_TOKEN_SECRET:iview-development-token-secret-change-me}

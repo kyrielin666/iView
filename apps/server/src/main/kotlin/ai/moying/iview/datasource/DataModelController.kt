@@ -8,10 +8,7 @@ import ai.moying.iview.query.DataModelSchema
 import ai.moying.iview.query.DataModelService
 import ai.moying.iview.query.DataModelSyncResult
 import ai.moying.iview.query.DataModelPublishPlan
-import ai.moying.iview.query.DataSourceService
 import ai.moying.iview.query.DatasetService
-import ai.moying.iview.query.DatasetSql
-import ai.moying.iview.query.SafeSql
 import ai.moying.iview.query.DataModelStatus
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -23,7 +20,6 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
-import java.sql.DriverManager
 
 class DataModelRequest { var datasetId: Long? = null; var name: String = ""; var description: String? = null }
 class DataModelPreviewRequest { var variables: Map<String, String> = emptyMap() }
@@ -35,7 +31,7 @@ class DataModelPublishRequest { var expectedSchemaVersion: Int? = null }
 class DataModelController(
     private val models: DataModelService,
     private val datasets: DatasetService,
-    private val sources: DataSourceService,
+    private val execution: DataSourceExecutionService,
 ) {
     @GetMapping fun list() = ApiResponse.success(models.list().map(::view))
     @GetMapping("/{id}") fun get(@PathVariable id: Long) = ApiResponse.success(view(models.get(id)))
@@ -49,21 +45,13 @@ class DataModelController(
     @PostMapping("/{id}/preview") fun preview(@PathVariable id: Long, @RequestBody request: DataModelPreviewRequest): ApiResponse<SqlResult> {
         val model = models.get(id)
         if (model.status != DataModelStatus.PUBLISHED) throw IllegalArgumentException("只有已发布数据模型可以提供看板预览数据")
-        val dataset = datasets.get(model.datasetId); val credential = sources.credential(dataset.sourceId)
-        val bound = DatasetSql.bindVariables(SafeSql.limit(dataset.sql, 100), request.variables)
-        return ApiResponse.success(DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { execute(it, bound.sql, bound.values) })
+        val dataset = datasets.get(model.datasetId)
+        return ApiResponse.success(execution.queryDataset(dataset, 100, request.variables))
     }
 
     private fun readFields(id: Long, variables: Map<String, String>): List<DataModelField> {
-        val model = models.get(id); val dataset = datasets.get(model.datasetId); val credential = sources.credential(dataset.sourceId)
-        val bound = DatasetSql.bindVariables(DatasetSql.schemaQuery(dataset.sql), variables)
-        return DriverManager.getConnection(credential.jdbcUrl, credential.username, credential.password).use { connection ->
-            connection.prepareStatement(bound.sql).use { statement ->
-                bound.values.forEachIndexed { index, value -> statement.setString(index + 1, value) }
-                statement.executeQuery().use { rs ->
-                val metadata = rs.metaData; (1..metadata.columnCount).map { DataModelField(metadata.getColumnLabel(it), metadata.getColumnTypeName(it), metadata.isNullable(it) != 0) }
-            } }
-        }
+        val model = models.get(id); val dataset = datasets.get(model.datasetId)
+        return execution.schema(dataset, variables).map { DataModelField(it.name, it.type, it.nullable) }
     }
     private fun DataModelRequest.draft() = DataModelDraft(datasetId ?: 0, name, description ?: "")
     private fun view(model: DataModel) = mapOf("id" to model.id, "dataset_id" to model.datasetId, "name" to model.name, "description" to model.description, "status" to model.status.name.lowercase(), "latest_schema_version" to model.latestSchemaVersion, "published_schema_version" to model.publishedSchemaVersion, "created_at" to model.createdAt, "updated_at" to model.updatedAt)

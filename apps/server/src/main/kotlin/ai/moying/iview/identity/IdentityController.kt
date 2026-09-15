@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.web.bind.annotation.*
+import org.springframework.util.AntPathMatcher
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -39,6 +40,7 @@ class IdentityService(
     @Value("\${iview.auth.bootstrap-admin-password:}") private val bootstrapPassword: String,
 ) {
     private val random = SecureRandom()
+    private val pathMatcher = AntPathMatcher()
     @PostConstruct fun bootstrap() {
         if ((jdbc.queryForObject("SELECT COUNT(*) FROM iview_user", Long::class.java) ?: 0) != 0L) return
         require(bootstrapPassword.length >= 12) { "首次启动必须设置至少 12 位的 IVIEW_BOOTSTRAP_ADMIN_PASSWORD" }
@@ -63,7 +65,14 @@ class IdentityService(
     fun current(header: String?): AuthUser { val token = header?.removePrefix("Bearer ")?.trim().orEmpty(); val fields = decode(token); return findById(fields[0].toLongOrNull() ?: throw AuthenticationException("访问令牌无效"))?.takeIf { it.enabled }?.view() ?: throw AuthenticationException("用户不存在或已停用") }
     fun permitted(user: AuthUser, method: String, path: String): Boolean {
         val permissions = jdbc.query("SELECT p.permission_code FROM iview_permission p JOIN iview_role_permission rp ON rp.permission_id=p.id JOIN iview_user_role ur ON ur.role_id=rp.role_id WHERE ur.user_id=?", { rs, _ -> rs.getString(1) }, user.id)
-        return "*" in permissions || "$method:$path" in permissions
+        val normalizedMethod = method.uppercase()
+        return permissions.any { permission ->
+            if (permission == "*") true else {
+                val separator = permission.indexOf(':')
+                separator > 0 && permission.substring(0, separator).uppercase() == normalizedMethod &&
+                    pathMatcher.match(permission.substring(separator + 1), path)
+            }
+        }
     }
     private fun issue(user: AuthUser): TokenPair { val expires = Instant.now().plusSeconds(900); val access = encode(listOf(user.id.toString(), user.username, expires.epochSecond.toString())); val refresh = randomToken(); jdbc.update("INSERT INTO iview_refresh_token(user_id,token_hash,expires_at) VALUES(?,?,?)", user.id, sha256(refresh), Instant.now().plusSeconds(604800)); return TokenPair(access, refresh, 900, user) }
     private fun findByUsername(username: String) = jdbc.query("SELECT id,username,password_hash,display_name,enabled FROM iview_user WHERE username=?", { rs, _ -> StoredUser(rs.getLong("id"),rs.getString("username"),rs.getString("password_hash"),rs.getString("display_name"),rs.getBoolean("enabled")) }, username).firstOrNull()

@@ -78,7 +78,7 @@ class DashboardDocumentValidatorTest {
 
     @Test fun `industrial indicator components are supported`() {
         val validator = DashboardDocumentValidator { DataModel(it, 1, "m", "", DataModelStatus.PUBLISHED, 1, 1, Instant.EPOCH, Instant.EPOCH) }
-        val components = listOf("gauge", "progress", "status", "clock").mapIndexed { index, type -> DashboardComponent(type, type, index, 0, 100, 80, modelId = if (type == "clock") null else 1, fields = if (type == "clock") emptyList() else listOf("value")) }
+        val components = listOf("gauge", "progress", "status", "clock", "tank", "valve", "motor", "pipe", "alarm").mapIndexed { index, type -> DashboardComponent(type, type, index, 0, 100, 80, modelId = if (type == "clock") null else 1, fields = if (type == "clock") emptyList() else listOf("value")) }
         assertEquals(components, validator.validate(DashboardDocument(components = components)).components)
     }
 

@@ -105,7 +105,7 @@ class IdentityAdministrationService(private val jdbc: JdbcTemplate) {
     }
 
     @Transactional fun createPermission(body: ManagedPermissionRequest, actor: AuthUser): ManagedPermission {
-        val code = required(body.code, "权限编码", 128); if (count("SELECT COUNT(*) FROM iview_permission WHERE permission_code=?", code) > 0) throw IllegalArgumentException("权限编码已存在")
+        val code = required(body.code, "权限编码", 128); validatePermissionCode(code); if (count("SELECT COUNT(*) FROM iview_permission WHERE permission_code=?", code) > 0) throw IllegalArgumentException("权限编码已存在")
         jdbc.update("INSERT INTO iview_permission(permission_code,permission_name) VALUES(?,?)", code, required(body.name, "权限名称", 100)); val id = jdbc.queryForObject("SELECT id FROM iview_permission WHERE permission_code=?", Long::class.java, code)!!; record(actor, "CREATE", "PERMISSION", id, code); return permissions().first { it.id == id }
     }
     @Transactional fun updatePermission(id: Long, body: ManagedPermissionRequest, actor: AuthUser): ManagedPermission {
@@ -121,6 +121,10 @@ class IdentityAdministrationService(private val jdbc: JdbcTemplate) {
     private fun replaceRolePermissions(roleId: Long, codes: List<String>) { jdbc.update("DELETE FROM iview_role_permission WHERE role_id=?", roleId); codes.distinct().forEach { jdbc.update("INSERT INTO iview_role_permission(role_id,permission_id) SELECT ?,id FROM iview_permission WHERE permission_code=?", roleId, it) } }
     private fun validateRoles(codes: List<String>) { val normalized = codes.map(String::uppercase).distinct(); if (normalized.isEmpty()) throw IllegalArgumentException("用户至少需要一个角色"); if (normalized.any { count("SELECT COUNT(*) FROM iview_role WHERE role_code=?", it) == 0L }) throw IllegalArgumentException("包含不存在的角色") }
     private fun validatePermissions(codes: List<String>) { if (codes.distinct().any { count("SELECT COUNT(*) FROM iview_permission WHERE permission_code=?", it) == 0L }) throw IllegalArgumentException("包含不存在的权限") }
+    private fun validatePermissionCode(code: String) {
+        if (code == "*") throw IllegalArgumentException("全部权限为系统保留权限")
+        if (!Regex("^(GET|POST|PUT|PATCH|DELETE):/api/v1/[A-Za-z0-9_.*{}/-]+$").matches(code)) throw IllegalArgumentException("权限编码格式应为 METHOD:/api/v1/path，可使用 * 或 ** 通配路径")
+    }
     private fun userRoles(id: Long) = jdbc.query("SELECT r.role_code FROM iview_role r JOIN iview_user_role ur ON ur.role_id=r.id WHERE ur.user_id=? ORDER BY r.role_code", { rs, _ -> rs.getString(1) }, id)
     private fun rolePermissions(id: Long) = jdbc.query("SELECT p.permission_code FROM iview_permission p JOIN iview_role_permission rp ON rp.permission_id=p.id WHERE rp.role_id=? ORDER BY p.permission_code", { rs, _ -> rs.getString(1) }, id)
     private fun count(sql: String, value: Any) = jdbc.queryForObject(sql, Long::class.java, value) ?: 0

@@ -2,7 +2,7 @@ package ai.moying.iview.query
 
 import java.time.Instant
 
-enum class DataSourceType { POSTGRESQL }
+enum class DataSourceType { POSTGRESQL, MONGODB, HTTP, FILE }
 
 data class DataSource(
     val id: Long,
@@ -25,7 +25,12 @@ data class DataSourceDraft(
     val description: String = "",
 )
 
-data class DataSourceCredential(val jdbcUrl: String, val username: String, val password: String)
+data class DataSourceCredential(
+    val type: DataSourceType,
+    val endpoint: String,
+    val username: String,
+    val password: String,
+)
 
 data class StoredDataSource(val source: DataSource, val passwordCipher: String)
 
@@ -56,7 +61,7 @@ class DataSourceService(
 
     fun create(draft: DataSourceDraft): DataSource {
         val normalized = normalize(draft, requirePassword = true)
-        return repository.create(normalized, cipher.encrypt(requireNotNull(normalized.password)))
+        return repository.create(normalized, cipher.encrypt(normalized.password ?: ""))
     }
 
     fun update(id: Long, draft: DataSourceDraft): DataSource {
@@ -72,7 +77,7 @@ class DataSourceService(
 
     fun credential(id: Long): DataSourceCredential {
         val record = repository.find(id) ?: throw DataSourceNotFoundException("数据源不存在: $id")
-        return DataSourceCredential(record.source.jdbcUrl, record.source.username, cipher.decrypt(record.passwordCipher))
+        return DataSourceCredential(record.source.type, record.source.jdbcUrl, record.source.username, cipher.decrypt(record.passwordCipher))
     }
 
     private fun normalize(draft: DataSourceDraft, requirePassword: Boolean): DataSourceDraft {
@@ -81,9 +86,29 @@ class DataSourceService(
             password = draft.password?.takeIf(String::isNotBlank), description = draft.description.trim(),
         )
         if (normalized.name.isBlank() || normalized.name.length > 100) throw DataSourceValidationException("数据源名称不能为空且不能超过100位")
-        if (!normalized.jdbcUrl.startsWith("jdbc:postgresql://")) throw DataSourceValidationException("PostgreSQL JDBC URL 必须以 jdbc:postgresql:// 开头")
-        if (normalized.username.isBlank()) throw DataSourceValidationException("数据库用户名不能为空")
-        if (requirePassword && normalized.password == null) throw DataSourceValidationException("新建数据源必须提供数据库密码")
+        if (normalized.jdbcUrl.isBlank() || normalized.jdbcUrl.length > 1_000) throw DataSourceValidationException("数据源地址不能为空且不能超过1000位")
+        when (normalized.type) {
+            DataSourceType.POSTGRESQL -> {
+                if (!normalized.jdbcUrl.startsWith("jdbc:postgresql://")) throw DataSourceValidationException("PostgreSQL JDBC URL 必须以 jdbc:postgresql:// 开头")
+                if (normalized.username.isBlank()) throw DataSourceValidationException("数据库用户名不能为空")
+                if (requirePassword && normalized.password == null) throw DataSourceValidationException("新建 PostgreSQL 数据源必须提供数据库密码")
+            }
+            DataSourceType.MONGODB -> if (!normalized.jdbcUrl.startsWith("mongodb://") && !normalized.jdbcUrl.startsWith("mongodb+srv://")) {
+                throw DataSourceValidationException("MongoDB 地址必须以 mongodb:// 或 mongodb+srv:// 开头")
+            }
+            DataSourceType.HTTP -> if (!normalized.jdbcUrl.startsWith("http://") && !normalized.jdbcUrl.startsWith("https://")) {
+                throw DataSourceValidationException("HTTP 地址必须以 http:// 或 https:// 开头")
+            }
+            DataSourceType.FILE -> {
+                val value = normalized.jdbcUrl.replace('\\', '/')
+                if (value.startsWith("/") || Regex("^[A-Za-z]:").containsMatchIn(value) || value.split('/').any { it == ".." }) {
+                    throw DataSourceValidationException("文件数据源必须填写数据目录内的相对路径")
+                }
+                if (!value.lowercase().endsWith(".csv") && !value.lowercase().endsWith(".json")) {
+                    throw DataSourceValidationException("文件数据源仅支持 CSV 或 JSON 文件")
+                }
+            }
+        }
         return normalized
     }
 }

@@ -56,15 +56,17 @@ class DatasetService(private val repository: DatasetRepository, private val sour
     fun get(id: Long) = repository.find(id) ?: throw DatasetNotFoundException("数据集不存在: $id")
 
     fun create(draft: DatasetDraft): Dataset {
-        val normalized = normalize(draft)
-        sources.get(normalized.sourceId)
+        if (draft.sourceId <= 0) throw DatasetValidationException("数据集必须选择一个数据源")
+        val source = sources.get(draft.sourceId)
+        val normalized = normalize(draft, source.type)
         return repository.create(normalized)
     }
 
     fun update(id: Long, draft: DatasetDraft): Dataset {
         get(id)
-        val normalized = normalize(draft)
-        sources.get(normalized.sourceId)
+        if (draft.sourceId <= 0) throw DatasetValidationException("数据集必须选择一个数据源")
+        val source = sources.get(draft.sourceId)
+        val normalized = normalize(draft, source.type)
         return repository.update(id, normalized) ?: throw DatasetNotFoundException("数据集不存在: $id")
     }
 
@@ -102,11 +104,15 @@ class DatasetService(private val repository: DatasetRepository, private val sour
         if (!repository.deleteFolder(id)) throw DatasetNotFoundException("数据集文件夹不存在: $id")
     }
 
-    private fun normalize(draft: DatasetDraft): DatasetDraft {
+    private fun normalize(draft: DatasetDraft, sourceType: DataSourceType): DatasetDraft {
         val normalized = draft.copy(name = draft.name.trim(), sql = draft.sql.trim(), description = draft.description.trim())
         if (normalized.sourceId <= 0) throw DatasetValidationException("数据集必须选择一个数据源")
         if (normalized.name.isBlank() || normalized.name.length > 100) throw DatasetValidationException("数据集名称不能为空且不能超过100位")
-        try { SafeSql.selectOnly(normalized.sql) } catch (error: QueryValidationException) { throw DatasetValidationException(error.message ?: "数据集 SQL 无效") }
+        if (sourceType == DataSourceType.POSTGRESQL) {
+            try { SafeSql.selectOnly(normalized.sql) } catch (error: QueryValidationException) { throw DatasetValidationException(error.message ?: "数据集 SQL 无效") }
+        } else if (normalized.sql.length > 65_536 || !normalized.sql.startsWith("{") || !normalized.sql.endsWith("}")) {
+            throw DatasetValidationException("${sourceType.name} 数据集查询定义必须是 JSON 对象且不能超过64KB")
+        }
         normalized.folderId?.let(::getFolder)
         return normalized
     }

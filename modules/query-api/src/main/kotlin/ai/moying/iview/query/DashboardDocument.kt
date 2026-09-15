@@ -35,7 +35,7 @@ class DashboardDocumentValidator(private val modelById: (Long) -> DataModel) {
         val componentIds = document.components.map { it.id }.toSet()
         val repeatedChildIds = document.components.flatMap { it.repeat?.childIds ?: emptyList() }
         if (repeatedChildIds.size != repeatedChildIds.toSet().size) throw DashboardValidationException("同一子组件不能被多个重复容器引用")
-        val supported = setOf("chart", "table", "metric", "gauge", "progress", "status", "clock", "text", "image", "decoration", "container", "tuple", "iframe")
+        val supported = setOf("chart", "table", "metric", "gauge", "progress", "status", "clock", "text", "image", "decoration", "container", "tuple", "iframe", "tank", "valve", "motor", "pipe", "alarm")
         document.components.forEach { component ->
             if (component.type !in supported) throw DashboardValidationException("不支持的组件类型: ${component.type}")
             if (component.x < 0 || component.y < 0 || component.width !in 1..7680 || component.height !in 1..4320) throw DashboardValidationException("组件布局参数无效: ${component.id}")
