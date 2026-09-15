@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController
 class DataModelRequest { var datasetId: Long? = null; var name: String = ""; var description: String? = null }
 class DataModelPreviewRequest { var variables: Map<String, String> = emptyMap() }
 class DataModelSyncRequest { var variables: Map<String, String> = emptyMap() }
-class DataModelPublishRequest { var expectedSchemaVersion: Int? = null }
+class DataModelPublishRequest { var expectedSchemaVersion: Int? = null; var confirmBreaking = false }
 
 @RestController
 @RequestMapping("/api/v1/data-models")
@@ -41,7 +41,11 @@ class DataModelController(
     @GetMapping("/{id}/schemas") fun schemas(@PathVariable id: Long) = ApiResponse.success(models.schemas(id).map(::schemaView))
     @PostMapping("/{id}/sync") fun sync(@PathVariable id: Long, @RequestBody(required = false) request: DataModelSyncRequest?) = ApiResponse.success(syncView(models.sync(id, readFields(id, request?.variables ?: emptyMap()))))
     @GetMapping("/{id}/publish-plan") fun publishPlan(@PathVariable id: Long) = ApiResponse.success(publishPlanView(models.publishPlan(id)))
-    @PostMapping("/{id}/publish") fun publish(@PathVariable id: Long, @RequestBody(required = false) request: DataModelPublishRequest?) = ApiResponse.success(view(models.publish(id, request?.expectedSchemaVersion)))
+    @PostMapping("/{id}/publish") fun publish(@PathVariable id: Long, @RequestBody(required = false) request: DataModelPublishRequest?): ApiResponse<Map<String, Any?>> {
+        val plan = models.publishPlan(id)
+        if (plan.breakingChanges > 0 && request?.confirmBreaking != true) throw ai.moying.iview.query.DataModelValidationException("发布计划包含 ${plan.breakingChanges} 项破坏性字段变更，必须明确确认后才能发布")
+        return ApiResponse.success(view(models.publish(id, request?.expectedSchemaVersion)))
+    }
     @PostMapping("/{id}/preview") fun preview(@PathVariable id: Long, @RequestBody request: DataModelPreviewRequest): ApiResponse<SqlResult> {
         val model = models.get(id)
         if (model.status != DataModelStatus.PUBLISHED) throw IllegalArgumentException("只有已发布数据模型可以提供看板预览数据")

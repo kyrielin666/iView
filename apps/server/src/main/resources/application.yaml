@@ -47,8 +47,14 @@ iview:
   backup:
     directory: ${IVIEW_BACKUP_DIRECTORY:./data/backups}
     retention-count: ${IVIEW_BACKUP_RETENTION_COUNT:7}
-    # 恢复会重建整个 H2 数据库，只能在维护窗口明确启用。
+    # 恢复会重建整个数据库，只能在维护窗口明确启用。
     restore-enabled: ${IVIEW_BACKUP_RESTORE_ENABLED:false}
+    postgres:
+      # PostgreSQL 备份默认关闭；启用后需要在 PATH 中提供 pg_dump 和 pg_restore，或指定完整命令路径。
+      enabled: ${IVIEW_BACKUP_POSTGRES_ENABLED:false}
+      pg-dump-command: ${IVIEW_BACKUP_POSTGRES_PG_DUMP_COMMAND:pg_dump}
+      pg-restore-command: ${IVIEW_BACKUP_POSTGRES_PG_RESTORE_COMMAND:pg_restore}
+      command-timeout-seconds: ${IVIEW_BACKUP_POSTGRES_COMMAND_TIMEOUT_SECONDS:1800}
   collector:
     scheduling-enabled: false
     scan-delay-ms: 1000
