@@ -150,6 +150,7 @@ data class ControlLogFilter(
     val pageSize: Int = 20,
     val deviceId: Long? = null,
     val controlPointId: Long? = null,
+    val allowedDeviceIds: Set<Long>? = null,
 )
 
 data class DeviceCommand(
@@ -171,6 +172,8 @@ data class DeviceFilter(
     val keyword: String? = null,
     val templateId: Long? = null,
     val enabled: Boolean? = null,
+    /** Null permits every device; an empty set intentionally permits none. */
+    val allowedDeviceIds: Set<Long>? = null,
 )
 
 interface DeviceCatalogRepository {

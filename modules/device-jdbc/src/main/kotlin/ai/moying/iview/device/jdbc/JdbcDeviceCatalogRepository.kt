@@ -252,6 +252,7 @@ class JdbcDeviceCatalogRepository(
         val params = mutableMapOf<String, Any>("limit" to filter.pageSize, "offset" to (filter.page - 1) * filter.pageSize)
         filter.deviceId?.let { clauses += "device_id=:deviceId"; params["deviceId"] = it }
         filter.controlPointId?.let { clauses += "control_point_id=:controlPointId"; params["controlPointId"] = it }
+        filter.allowedDeviceIds?.let { ids -> if (ids.isEmpty()) clauses += "1=0" else { clauses += "device_id IN (:allowedDeviceIds)"; params["allowedDeviceIds"] = ids } }
         val where = if (clauses.isEmpty()) "" else "WHERE ${clauses.joinToString(" AND ")}"
         val total = count("SELECT COUNT(*) FROM iview_control_log $where", params)
         val list = jdbc.query(
@@ -270,6 +271,9 @@ class JdbcDeviceCatalogRepository(
         }
         filter.templateId?.let { clauses += "template_id=:templateId"; params["templateId"] = it }
         filter.enabled?.let { clauses += "enabled=:enabled"; params["enabled"] = it }
+        filter.allowedDeviceIds?.let { ids ->
+            if (ids.isEmpty()) clauses += "1=0" else { clauses += "id IN (:allowedDeviceIds)"; params["allowedDeviceIds"] = ids }
+        }
         val where = if (clauses.isEmpty()) "" else "WHERE ${clauses.joinToString(" AND ")}"
         val total = count("SELECT COUNT(*) FROM iview_device $where", params)
         val list = jdbc.query(

@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.time.Instant
+import jakarta.servlet.http.HttpServletRequest
 import kotlinx.coroutines.runBlocking
 import ai.moying.iview.collector.DeviceSessionPool
 
@@ -212,6 +213,7 @@ class TemplatePointController(private val service: DeviceCatalogService) {
 class TemplateControlPointController(
     private val service: DeviceCatalogService,
     private val control: DeviceControlService,
+    private val scope: DeviceScopeGuard,
 ) {
     @GetMapping("/{id}") fun get(@PathVariable id: Long) = ApiResponse.success(controlPointView(service.getControlPoint(id)))
 
@@ -244,37 +246,38 @@ class TemplateControlPointController(
     }
 
     @PostMapping("/{id}/execute")
-    fun execute(@PathVariable id: Long, @RequestBody request: ExecuteControlRequest): ApiResponse<ControlExecutionView> {
+    fun execute(@PathVariable id: Long, @RequestBody request: ExecuteControlRequest, servletRequest: HttpServletRequest): ApiResponse<ControlExecutionView> {
         if (request.deviceId <= 0) throw CatalogValidationException("device_id 必须大于0")
         if (request.value == null) throw CatalogValidationException("value 不能为空")
+        scope.require(servletRequest, request.deviceId)
         return ApiResponse.success(runBlocking { control.execute(id, request.deviceId, request.value) })
     }
 }
 
 @RestController
 @RequestMapping("/api/v1/control-logs")
-class ControlLogController(private val service: DeviceCatalogService) {
+class ControlLogController(private val service: DeviceCatalogService, private val scope: DeviceScopeGuard) {
     @GetMapping
     fun list(
         @RequestParam(defaultValue = "1") page: Int,
         @RequestParam(name = "page_size", defaultValue = "20") pageSize: Int,
         @RequestParam(name = "device_id", required = false) deviceId: Long?,
-        @RequestParam(name = "control_point_id", required = false) controlPointId: Long?,
-    ) = ApiResponse.success(service.listControlLogs(ControlLogFilter(page, pageSize, deviceId, controlPointId)))
+        @RequestParam(name = "control_point_id", required = false) controlPointId: Long?, request: HttpServletRequest,
+    ) = ApiResponse.success(service.listControlLogs(ControlLogFilter(page, pageSize, deviceId, controlPointId, scope.allowed(request))))
 }
 
 @RestController
 @RequestMapping("/api/v1/devices")
-class DeviceController(private val service: DeviceCatalogService) {
+class DeviceController(private val service: DeviceCatalogService, private val scope: DeviceScopeGuard) {
     @GetMapping
     fun list(
         @RequestParam(defaultValue = "1") page: Int,
         @RequestParam(name = "page_size", defaultValue = "20") pageSize: Int,
         @RequestParam(required = false) keyword: String?,
         @RequestParam(name = "template_id", required = false) templateId: Long?,
-        @RequestParam(required = false) status: Int?,
+        @RequestParam(required = false) status: Int?, request: HttpServletRequest,
     ): ApiResponse<Page<DeviceView>> {
-        val result = service.listDevices(DeviceFilter(page, pageSize, keyword, templateId, status?.let { it != 0 }))
+        val result = service.listDevices(DeviceFilter(page, pageSize, keyword, templateId, status?.let { it != 0 }, scope.allowed(request)))
         return ApiResponse.success(Page(result.list.map(::view), result.total, result.page, result.pageSize))
     }
     @GetMapping("/options") fun options() = ApiResponse.success(mapOf(
@@ -282,17 +285,18 @@ class DeviceController(private val service: DeviceCatalogService) {
         "groups" to service.listGroups().map { mapOf("value" to it.id, "label" to it.groupName) },
     ))
     @GetMapping("/check-sn") fun checkSn(@RequestParam(name = "device_sn") sn: String, @RequestParam(name = "exclude_id", required = false) excludeId: Long?) = ApiResponse.success(mapOf("exists" to service.deviceSnExists(sn, excludeId)))
-    @GetMapping("/{id}") fun get(@PathVariable id: Long) = ApiResponse.success(view(service.getDevice(id)))
+    @GetMapping("/{id}") fun get(@PathVariable id: Long, request: HttpServletRequest) = ApiResponse.success(scope.require(request, id).let { view(service.getDevice(id)) })
     @PostMapping @ResponseStatus(HttpStatus.CREATED)
     fun create(@RequestBody request: DeviceRequest) = ApiResponse.success(view(service.createDevice(request.command(request.deviceSn ?: ""))))
-    @PutMapping("/{id}") fun update(@PathVariable id: Long, @RequestBody request: DeviceRequest): ApiResponse<DeviceView> {
+    @PutMapping("/{id}") fun update(@PathVariable id: Long, @RequestBody request: DeviceRequest, servletRequest: HttpServletRequest): ApiResponse<DeviceView> {
+        scope.require(servletRequest, id)
         val sn = request.deviceSn ?: service.getDevice(id).deviceSn
         return ApiResponse.success(view(service.updateDevice(id, request.command(sn))))
     }
-    @DeleteMapping("/{id}") fun delete(@PathVariable id: Long): ApiResponse<Nothing> { service.deleteDevice(id); return ApiResponse.success() }
-    @DeleteMapping("/batch/{ids}") fun batchDelete(@PathVariable ids: String): ApiResponse<Nothing> { ids.split(',').map(String::trim).filter(String::isNotEmpty).map(String::toLong).forEach(service::deleteDevice); return ApiResponse.success() }
-    @PutMapping("/{id}/enable") fun enable(@PathVariable id: Long) = ApiResponse.success(view(service.setEnabled(id, true)))
-    @PutMapping("/{id}/disable") fun disable(@PathVariable id: Long) = ApiResponse.success(view(service.setEnabled(id, false)))
+    @DeleteMapping("/{id}") fun delete(@PathVariable id: Long, request: HttpServletRequest): ApiResponse<Nothing> { scope.require(request, id); service.deleteDevice(id); return ApiResponse.success() }
+    @DeleteMapping("/batch/{ids}") fun batchDelete(@PathVariable ids: String, request: HttpServletRequest): ApiResponse<Nothing> { ids.split(',').map(String::trim).filter(String::isNotEmpty).map(String::toLong).onEach { scope.require(request, it) }.forEach(service::deleteDevice); return ApiResponse.success() }
+    @PutMapping("/{id}/enable") fun enable(@PathVariable id: Long, request: HttpServletRequest) = ApiResponse.success(scope.require(request, id).let { view(service.setEnabled(id, true)) })
+    @PutMapping("/{id}/disable") fun disable(@PathVariable id: Long, request: HttpServletRequest) = ApiResponse.success(scope.require(request, id).let { view(service.setEnabled(id, false)) })
 
     private fun view(device: Device): DeviceView {
         val template = service.getTemplate(device.templateId)
@@ -315,34 +319,35 @@ class DeviceProtocolController(
     private val diagnostics: DeviceDiagnosticsService,
     private val collection: DeviceCollectionService,
     private val sessions: DeviceSessionPool,
+    private val scope: DeviceScopeGuard,
 ) {
     @GetMapping("/statistics")
     fun statistics() = ApiResponse.success(collection.statistics(sessions.statuses().size))
 
     @PostMapping("/{id}/test")
-    fun test(@PathVariable id: Long) = ApiResponse.success(runBlocking { diagnostics.test(id) })
+    fun test(@PathVariable id: Long, request: HttpServletRequest) = ApiResponse.success(scope.require(request, id).let { runBlocking { diagnostics.test(id) } })
 
     @PostMapping("/{id}/diagnose")
-    fun diagnose(@PathVariable id: Long) = ApiResponse.success(runBlocking { diagnostics.diagnose(id) })
+    fun diagnose(@PathVariable id: Long, request: HttpServletRequest) = ApiResponse.success(scope.require(request, id).let { runBlocking { diagnostics.diagnose(id) } })
 
     @PostMapping("/{id}/collect")
-    fun collect(@PathVariable id: Long) = ApiResponse.success(runBlocking { collection.collect(id) })
+    fun collect(@PathVariable id: Long, request: HttpServletRequest) = ApiResponse.success(scope.require(request, id).let { runBlocking { collection.collect(id) } })
 
     @PostMapping("/{id}/collect/{pointId}")
-    fun collectPoint(@PathVariable id: Long, @PathVariable pointId: Long) =
-        ApiResponse.success(runBlocking { collection.collect(id, pointId) })
+    fun collectPoint(@PathVariable id: Long, @PathVariable pointId: Long, request: HttpServletRequest) =
+        ApiResponse.success(scope.require(request, id).let { runBlocking { collection.collect(id, pointId) } })
 
     @GetMapping("/{id}/realtime")
-    fun realtime(@PathVariable id: Long) = ApiResponse.success(collection.realtime(id))
+    fun realtime(@PathVariable id: Long, request: HttpServletRequest) = ApiResponse.success(scope.require(request, id).let { collection.realtime(id) })
 
     @GetMapping("/{id}/history")
     fun history(
         @PathVariable id: Long,
         @RequestParam(required = false) from: Instant?,
         @RequestParam(required = false) to: Instant?,
-        @RequestParam(defaultValue = "1000") limit: Int,
+        @RequestParam(defaultValue = "1000") limit: Int, request: HttpServletRequest,
     ): ApiResponse<List<CollectedPointView>> {
-        val end = to ?: Instant.now()
+        scope.require(request, id); val end = to ?: Instant.now()
         val start = from ?: end.minusSeconds(3600)
         return ApiResponse.success(collection.history(id, start, end, limit))
     }

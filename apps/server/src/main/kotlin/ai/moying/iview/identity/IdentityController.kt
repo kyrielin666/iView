@@ -74,6 +74,11 @@ class IdentityService(
             }
         }
     }
+    /** Null means unrestricted; an empty set means the user has no device data range. */
+    fun allowedDeviceIds(user: AuthUser): Set<Long>? {
+        if (user.roles.contains("ADMIN")) return null
+        return jdbc.query("SELECT device_id FROM iview_user_device_scope WHERE user_id=? ORDER BY device_id", { rs, _ -> rs.getLong(1) }, user.id).toSet()
+    }
     private fun issue(user: AuthUser): TokenPair { val expires = Instant.now().plusSeconds(900); val access = encode(listOf(user.id.toString(), user.username, expires.epochSecond.toString())); val refresh = randomToken(); jdbc.update("INSERT INTO iview_refresh_token(user_id,token_hash,expires_at) VALUES(?,?,?)", user.id, sha256(refresh), Instant.now().plusSeconds(604800)); return TokenPair(access, refresh, 900, user) }
     private fun findByUsername(username: String) = jdbc.query("SELECT id,username,password_hash,display_name,enabled FROM iview_user WHERE username=?", { rs, _ -> StoredUser(rs.getLong("id"),rs.getString("username"),rs.getString("password_hash"),rs.getString("display_name"),rs.getBoolean("enabled")) }, username).firstOrNull()
     private fun findById(id: Long) = jdbc.query("SELECT id,username,password_hash,display_name,enabled FROM iview_user WHERE id=?", { rs, _ -> StoredUser(rs.getLong("id"),rs.getString("username"),rs.getString("password_hash"),rs.getString("display_name"),rs.getBoolean("enabled")) }, id).firstOrNull()

@@ -14,11 +14,11 @@ import java.util.Base64
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
-data class ManagedUser(val id: Long, val username: String, val displayName: String, val enabled: Boolean, val roles: List<String>)
+data class ManagedUser(val id: Long, val username: String, val displayName: String, val enabled: Boolean, val roles: List<String>, val deviceIds: List<Long>)
 data class ManagedRole(val id: Long, val code: String, val name: String, val description: String, val permissions: List<String>)
 data class ManagedPermission(val id: Long, val code: String, val name: String)
 data class OperationAudit(val id: Long, val actor: String?, val action: String, val targetType: String, val targetId: String, val detail: String, val createdAt: Instant)
-class ManagedUserRequest { var username = ""; var displayName = ""; var password = ""; var enabled = true; var roleCodes: List<String> = emptyList() }
+class ManagedUserRequest { var username = ""; var displayName = ""; var password = ""; var enabled = true; var roleCodes: List<String> = emptyList(); var deviceIds: List<Long> = emptyList() }
 class ManagedRoleRequest { var code = ""; var name = ""; var description = ""; var permissionCodes: List<String> = emptyList() }
 class ManagedPermissionRequest { var code = ""; var name = "" }
 
@@ -56,7 +56,7 @@ class IdentityAdministrationService(private val jdbc: JdbcTemplate) {
     private val random = SecureRandom()
 
     fun users(): List<ManagedUser> = jdbc.query("SELECT id,username,display_name,enabled FROM iview_user ORDER BY id") { rs, _ ->
-        val id = rs.getLong("id"); ManagedUser(id, rs.getString("username"), rs.getString("display_name"), rs.getBoolean("enabled"), userRoles(id))
+        val id = rs.getLong("id"); ManagedUser(id, rs.getString("username"), rs.getString("display_name"), rs.getBoolean("enabled"), userRoles(id), userDeviceIds(id))
     }
     fun roles(): List<ManagedRole> = jdbc.query("SELECT id,role_code,role_name,description FROM iview_role ORDER BY role_code") { rs, _ ->
         val id = rs.getLong("id"); ManagedRole(id, rs.getString("role_code"), rs.getString("role_name"), rs.getString("description"), rolePermissions(id))
@@ -67,19 +67,19 @@ class IdentityAdministrationService(private val jdbc: JdbcTemplate) {
     @Transactional fun createUser(body: ManagedUserRequest, actor: AuthUser): ManagedUser {
         val username = validateCode(body.username, "用户名").lowercase(); validatePassword(body.password)
         if (count("SELECT COUNT(*) FROM iview_user WHERE username=?", username) > 0) throw IllegalArgumentException("用户名已存在")
-        validateRoles(body.roleCodes)
+        validateRoles(body.roleCodes); validateDeviceIds(body.deviceIds)
         jdbc.update("INSERT INTO iview_user(username,password_hash,display_name,enabled) VALUES(?,?,?,?)", username, passwordHash(body.password), required(body.displayName, "显示名称", 100), body.enabled)
         val id = jdbc.queryForObject("SELECT id FROM iview_user WHERE username=?", Long::class.java, username)!!
-        replaceUserRoles(id, body.roleCodes); record(actor, "CREATE", "USER", id, username); return users().first { it.id == id }
+        replaceUserRoles(id, body.roleCodes); replaceUserDeviceScope(id, body.deviceIds); record(actor, "CREATE", "USER", id, username); return users().first { it.id == id }
     }
     @Transactional fun updateUser(id: Long, body: ManagedUserRequest, actor: AuthUser): ManagedUser {
         val current = users().firstOrNull { it.id == id } ?: throw IllegalArgumentException("用户不存在")
         if (id == actor.id && !body.enabled) throw IllegalArgumentException("不能停用当前登录用户")
         if (current.username == "admin" && !body.enabled) throw IllegalArgumentException("不能停用引导管理员")
-        validateRoles(body.roleCodes); if (body.password.isNotBlank()) validatePassword(body.password)
+        validateRoles(body.roleCodes); validateDeviceIds(body.deviceIds); if (body.password.isNotBlank()) validatePassword(body.password)
         jdbc.update("UPDATE iview_user SET display_name=?,enabled=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", required(body.displayName, "显示名称", 100), body.enabled, id)
         if (body.password.isNotBlank()) jdbc.update("UPDATE iview_user SET password_hash=? WHERE id=?", passwordHash(body.password), id)
-        replaceUserRoles(id, body.roleCodes)
+        replaceUserRoles(id, body.roleCodes); replaceUserDeviceScope(id, body.deviceIds)
         if (!body.enabled || body.password.isNotBlank()) jdbc.update("UPDATE iview_refresh_token SET revoked_at=CURRENT_TIMESTAMP WHERE user_id=? AND revoked_at IS NULL", id)
         record(actor, "UPDATE", "USER", id, current.username); return users().first { it.id == id }
     }
@@ -118,16 +118,20 @@ class IdentityAdministrationService(private val jdbc: JdbcTemplate) {
     }
 
     private fun replaceUserRoles(userId: Long, codes: List<String>) { jdbc.update("DELETE FROM iview_user_role WHERE user_id=?", userId); codes.distinct().forEach { jdbc.update("INSERT INTO iview_user_role(user_id,role_id) SELECT ?,id FROM iview_role WHERE role_code=?", userId, it.uppercase()) } }
+    private fun replaceUserDeviceScope(userId: Long, deviceIds: List<Long>) { jdbc.update("DELETE FROM iview_user_device_scope WHERE user_id=?", userId); deviceIds.distinct().forEach { jdbc.update("INSERT INTO iview_user_device_scope(user_id,device_id) VALUES(?,?)", userId, it) } }
     private fun replaceRolePermissions(roleId: Long, codes: List<String>) { jdbc.update("DELETE FROM iview_role_permission WHERE role_id=?", roleId); codes.distinct().forEach { jdbc.update("INSERT INTO iview_role_permission(role_id,permission_id) SELECT ?,id FROM iview_permission WHERE permission_code=?", roleId, it) } }
     private fun validateRoles(codes: List<String>) { val normalized = codes.map(String::uppercase).distinct(); if (normalized.isEmpty()) throw IllegalArgumentException("用户至少需要一个角色"); if (normalized.any { count("SELECT COUNT(*) FROM iview_role WHERE role_code=?", it) == 0L }) throw IllegalArgumentException("包含不存在的角色") }
+    private fun validateDeviceIds(ids: List<Long>) { if (ids.any { it <= 0 } || ids.distinct().size != ids.size) throw IllegalArgumentException("设备数据范围无效"); if (ids.isNotEmpty() && count("SELECT COUNT(*) FROM iview_device WHERE id IN (${ids.joinToString(",") { "?" }})", *ids.toTypedArray()) != ids.size.toLong()) throw IllegalArgumentException("设备数据范围包含不存在的设备") }
     private fun validatePermissions(codes: List<String>) { if (codes.distinct().any { count("SELECT COUNT(*) FROM iview_permission WHERE permission_code=?", it) == 0L }) throw IllegalArgumentException("包含不存在的权限") }
     private fun validatePermissionCode(code: String) {
         if (code == "*") throw IllegalArgumentException("全部权限为系统保留权限")
         if (!Regex("^(GET|POST|PUT|PATCH|DELETE):/api/v1/[A-Za-z0-9_.*{}/-]+$").matches(code)) throw IllegalArgumentException("权限编码格式应为 METHOD:/api/v1/path，可使用 * 或 ** 通配路径")
     }
     private fun userRoles(id: Long) = jdbc.query("SELECT r.role_code FROM iview_role r JOIN iview_user_role ur ON ur.role_id=r.id WHERE ur.user_id=? ORDER BY r.role_code", { rs, _ -> rs.getString(1) }, id)
+    private fun userDeviceIds(id: Long) = jdbc.query("SELECT device_id FROM iview_user_device_scope WHERE user_id=? ORDER BY device_id", { rs, _ -> rs.getLong(1) }, id)
     private fun rolePermissions(id: Long) = jdbc.query("SELECT p.permission_code FROM iview_permission p JOIN iview_role_permission rp ON rp.permission_id=p.id WHERE rp.role_id=? ORDER BY p.permission_code", { rs, _ -> rs.getString(1) }, id)
     private fun count(sql: String, value: Any) = jdbc.queryForObject(sql, Long::class.java, value) ?: 0
+    private fun count(sql: String, vararg values: Any) = jdbc.queryForObject(sql, Long::class.java, *values) ?: 0
     private fun required(value: String, label: String, max: Int) = value.trim().also { if (it.isBlank() || it.length > max) throw IllegalArgumentException("$label 不能为空且不能超过 $max 个字符") }
     private fun validateCode(value: String, label: String) = value.trim().also { if (!Regex("[A-Za-z][A-Za-z0-9_.-]{2,63}").matches(it)) throw IllegalArgumentException("$label 必须为 3-64 位字母、数字、点、横线或下划线") }
     private fun validatePassword(value: String) { if (value.length !in 12..128) throw IllegalArgumentException("密码长度必须为 12-128 位") }
