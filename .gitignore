@@ -12,5 +12,6 @@ application-local.yaml
 # Local runtime databases
 data/
 apps/server/data/
+runtime/
 *.mv.db
 *.lock.db
