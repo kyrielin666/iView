@@ -14,6 +14,7 @@ dependencies {
     implementation(project(":modules:protocol-modbus-rtu"))
     implementation(project(":modules:protocol-mitsubishi-mc3e"))
     implementation(project(":modules:protocol-mitsubishi-mc4e"))
+    implementation(project(":modules:protocol-mitsubishi-mca1e"))
     implementation(project(":modules:protocol-s7"))
     implementation(project(":modules:protocol-opcua"))
     implementation(project(":modules:collector"))

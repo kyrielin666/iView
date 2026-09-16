@@ -23,6 +23,7 @@ include(
     ":modules:protocol-modbus-rtu",
     ":modules:protocol-mitsubishi-mc3e",
     ":modules:protocol-mitsubishi-mc4e",
+    ":modules:protocol-mitsubishi-mca1e",
     ":modules:protocol-s7",
     ":modules:protocol-opcua",
     ":modules:collector",
