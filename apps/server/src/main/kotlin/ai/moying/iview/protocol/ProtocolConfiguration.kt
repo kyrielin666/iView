@@ -4,6 +4,7 @@ import ai.moying.iview.collector.DriverRegistry
 import ai.moying.iview.protocol.modbus.ModbusTcpDriver
 import ai.moying.iview.protocol.modbus.rtu.ModbusRtuDriver
 import ai.moying.iview.protocol.mitsubishi.mc3e.MitsubishiMc3eDriver
+import ai.moying.iview.protocol.mitsubishi.mc4e.MitsubishiMc4eDriver
 import ai.moying.iview.protocol.opcua.OpcUaDriver
 import ai.moying.iview.protocol.s7.S7Driver
 import org.springframework.context.annotation.Bean
@@ -19,6 +20,9 @@ class ProtocolConfiguration {
 
     @Bean
     fun mitsubishiMc3eDriver(): ProtocolDriver = MitsubishiMc3eDriver()
+
+    @Bean
+    fun mitsubishiMc4eDriver(): ProtocolDriver = MitsubishiMc4eDriver()
 
     @Bean
     fun s7Driver(): ProtocolDriver = S7Driver()
