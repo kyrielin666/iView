@@ -21,7 +21,7 @@
 
 支持 `X`、`Y`、`M`、`SM`、`L`、`F`、`V`、`B`、`SB`、`D`、`SD`、`W`、`SW`、`R`、`TC`、`TS`、`TN`、`CC`、`CS`、`CN`、`S`。其中 `X`、`Y`、`B`、`SB`、`W`、`SW` 地址按十六进制解释，其余按十进制解释；例如 `X1A` 是地址 `0x1A`，`D100` 是十进制 100。
 
-布尔位软元件支持读写（`X` 输入继电器只读）；字软元件支持 `INT16`、`UINT16`、`INT32`、`UINT32`、`INT64`、`UINT64`、`FLOAT32`、`FLOAT64`。`STRING`、`BYTES` 暂不支持。点位可使用 `register_type`、`address_scale`、`address_offset`、`value_scale`、`value_offset` 和 `word_order`（`ABCD`、`CDAB`、`BADC`）。
+布尔位软元件支持读写（`X` 输入继电器只读）；字软元件支持 `INT16`、`UINT16`、`INT32`、`UINT32`、`INT64`、`UINT64`、`FLOAT32`、`FLOAT64`。`STRING`、`BYTES` 暂不支持。点位可使用 `register_type`、`address_scale`、`address_offset`、`value_scale`、`value_offset` 和 `word_order`；`ABCD` 为低字在前，`CDAB` 为高字在前，旧值 `BADC` 按 `CDAB` 兼容。
 
 ## 稳定性边界
 
