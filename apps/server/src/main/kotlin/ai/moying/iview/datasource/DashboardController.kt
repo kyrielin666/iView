@@ -11,6 +11,8 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 class DashboardRequest { var folderId:Long?=null;var modelId:Long?=null;var name:String="";var description:String?=null;var contentJson:String?=null }
 class DashboardFolderRequest { var name:String="";var parentId:Long?=null }
 class DashboardImportRequest { var export: DashboardExport? = null; var folderId: Long? = null; var name: String? = null }
+class DashboardCopyRequest { var name: String = "" }
+class DashboardMoveRequest { var folderId: Long? = null }
 data class DashboardExport(val format: String = "iview-dashboard", val version: Int = 1, val name: String, val description: String, val modelId: Long?, val document: DashboardDocument)
 @RestController @RequestMapping("/api/v1/dashboards")
 class DashboardController(private val dashboards:DashboardService, private val documents:DashboardDocumentValidator, private val objectMapper:ObjectMapper, private val realtime:DashboardRealtimeHub){
@@ -19,6 +21,8 @@ class DashboardController(private val dashboards:DashboardService, private val d
  @PostMapping @ResponseStatus(HttpStatus.CREATED) fun create(@RequestBody r:DashboardRequest)=ApiResponse.success(view(dashboards.create(r.draft())))
  @PutMapping("/{id}") fun update(@PathVariable id:Long,@RequestBody r:DashboardRequest)=ApiResponse.success(view(dashboards.update(id,r.draft())))
  @DeleteMapping("/{id}") fun delete(@PathVariable id:Long):ApiResponse<Nothing>{dashboards.delete(id);return ApiResponse.success()}
+ @PostMapping("/{id}/copy") fun copy(@PathVariable id: Long, @RequestBody request: DashboardCopyRequest) = ApiResponse.success(view(dashboards.copy(id, request.name)))
+ @PutMapping("/{id}/folder") fun move(@PathVariable id: Long, @RequestBody request: DashboardMoveRequest) = ApiResponse.success(view(dashboards.move(id, request.folderId)))
  @PutMapping("/{id}/document") fun document(@PathVariable id: Long, @RequestBody document: DashboardDocument): ApiResponse<DashboardDocument> {
   val dashboard = dashboards.get(id); val validated = documents.validate(document, dashboard.modelId)
   dashboards.replaceContent(id, objectMapper.writeValueAsString(validated)); realtime.notifyChanged(id, "document-updated"); return ApiResponse.success(validated)

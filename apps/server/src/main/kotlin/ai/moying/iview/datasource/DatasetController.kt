@@ -46,7 +46,11 @@ data class DatasetLineage(
 
 @RestController
 @RequestMapping("/api/v1/datasets")
-class DatasetController(private val datasets: DatasetService, private val execution: DataSourceExecutionService) {
+class DatasetController(
+    private val datasets: DatasetService,
+    private val execution: DataSourceExecutionService,
+    private val structuredQueries: StructuredDatasetQueryService = StructuredDatasetQueryService(),
+) {
     @GetMapping fun list(@RequestParam(name = "source_id", required = false) sourceId: Long?, @RequestParam(name = "folder_id", required = false) folderId: Long?) = ApiResponse.success(datasets.list(sourceId, folderId).map(::view))
     @GetMapping("/{id}") fun get(@PathVariable id: Long) = ApiResponse.success(view(datasets.get(id)))
     @PostMapping @ResponseStatus(HttpStatus.CREATED) fun create(@RequestBody request: DatasetRequest) = ApiResponse.success(view(datasets.create(request.draft())))
@@ -57,6 +61,12 @@ class DatasetController(private val datasets: DatasetService, private val execut
     @PostMapping("/{id}/preview") fun preview(@PathVariable id: Long, @RequestBody request: DatasetPreviewRequest): ApiResponse<SqlResult> {
         val dataset = datasets.get(id)
         return ApiResponse.success(execution.queryDataset(dataset, request.maxRows ?: 1_000, request.variables))
+    }
+    @PostMapping("/{id}/query")
+    fun query(@PathVariable id: Long, @RequestBody request: DatasetStructuredQueryRequest): ApiResponse<StructuredDatasetQueryResult> {
+        val dataset = datasets.get(id)
+        val sourceResult = execution.queryDataset(dataset, StructuredDatasetQueryService.SOURCE_ROW_LIMIT, request.variables)
+        return ApiResponse.success(structuredQueries.execute(sourceResult, request))
     }
     @PostMapping("/{id}/export") fun export(@PathVariable id: Long, @RequestBody(required = false) request: DatasetVariablesRequest?): ResponseEntity<ByteArray> {
         val dataset = datasets.get(id)

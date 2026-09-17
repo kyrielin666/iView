@@ -6,6 +6,7 @@ import ai.moying.iview.core.device.DeviceId
 import ai.moying.iview.core.device.PointValue
 import ai.moying.iview.core.device.ValueQuality
 import ai.moying.iview.telemetry.TelemetryRepository
+import com.fasterxml.jackson.annotation.JsonProperty
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 
@@ -44,7 +45,7 @@ data class DeviceRealtimeView(
     val deviceSn: String,
     val deviceName: String,
     val templateId: Long,
-    val isOnline: Boolean,
+    @get:JsonProperty("online") val isOnline: Boolean,
     val points: List<RealtimePointView>,
 )
 
@@ -61,6 +62,7 @@ class DeviceCollectionService(
     private val runtimeMapper: DeviceRuntimeMapper,
     private val engine: CollectionEngine,
     private val telemetry: TelemetryRepository,
+    private val realtimeHub: DeviceRealtimeHub,
 ) {
     private val lastScheduledAt = ConcurrentHashMap<Long, Instant>()
 
@@ -70,7 +72,11 @@ class DeviceCollectionService(
         val points = pointId?.let { id ->
             runtime.points.filter { it.id.value == id }.ifEmpty { throw CatalogNotFoundException("采集点不存在: $id") }
         } ?: runtime.points
-        return view(engine.collect(runtime.definition, points), runtime)
+        val collected = view(engine.collect(runtime.definition, points), runtime)
+        // CollectionEngine has already persisted the result through its telemetry sink.
+        // Publish the normalized view so a subscriber cannot observe a half-written batch.
+        realtimeHub.publish(realtime(deviceId))
+        return collected
     }
 
     fun realtime(deviceId: Long): DeviceRealtimeView {
@@ -100,13 +106,13 @@ class DeviceCollectionService(
         }
     }
 
-    fun statistics(sessionCount: Int): DeviceStatisticsView {
+    fun statistics(sessionCount: Int, allowedDeviceIds: Set<Long>? = null): DeviceStatisticsView {
         var page = 1
         var total = 0L
         var enabled = 0L
         var online = 0L
         do {
-            val result = catalog.listDevices(DeviceFilter(page, 100))
+            val result = catalog.listDevices(DeviceFilter(page, 100, allowedDeviceIds = allowedDeviceIds))
             total = result.total
             result.list.forEach { device ->
                 if (device.enabled) enabled++

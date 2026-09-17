@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.core.simple.SimpleJdbcInsert
 import org.springframework.stereotype.Repository
+import org.springframework.transaction.annotation.Transactional
 import java.sql.ResultSet
 import java.time.Instant
 
@@ -17,7 +18,11 @@ class JdbcDashboardRepository(private val jdbc: NamedParameterJdbcTemplate) : Da
     override fun find(id: Long) = jdbc.query("SELECT * FROM iview_dashboard WHERE id=:id", mapOf("id" to id), dashboardMapper).firstOrNull()
     override fun create(draft: DashboardDraft): Dashboard { val id = dashboardInsert.executeAndReturnKey(values(draft)).toLong(); return requireNotNull(find(id)) }
     override fun update(id: Long, draft: DashboardDraft): Dashboard? { val n = jdbc.update("UPDATE iview_dashboard SET folder_id=:folder_id, model_id=:model_id, dashboard_name=:dashboard_name, description=:description, content_json=:content_json, updated_at=CURRENT_TIMESTAMP WHERE id=:id", values(draft) + ("id" to id)); return if(n==0)null else find(id) }
-    override fun delete(id: Long) = jdbc.update("DELETE FROM iview_dashboard WHERE id=:id", mapOf("id" to id)) > 0
+    @Transactional
+    override fun delete(id: Long): Boolean {
+        jdbc.update("UPDATE iview_dashboard SET published_snapshot_id=NULL WHERE id=:id", mapOf("id" to id))
+        return jdbc.update("DELETE FROM iview_dashboard WHERE id=:id", mapOf("id" to id)) > 0
+    }
     override fun listFolders() = jdbc.query("SELECT * FROM iview_dashboard_folder ORDER BY id", emptyMap<String, Any>(), folderMapper)
     override fun findFolder(id: Long) = jdbc.query("SELECT * FROM iview_dashboard_folder WHERE id=:id", mapOf("id" to id), folderMapper).firstOrNull()
     override fun createFolder(draft: DashboardFolderDraft): DashboardFolder { val id = folderInsert.executeAndReturnKey(mapOf("folder_name" to draft.name, "parent_id" to draft.parentId)).toLong(); return requireNotNull(findFolder(id)) }

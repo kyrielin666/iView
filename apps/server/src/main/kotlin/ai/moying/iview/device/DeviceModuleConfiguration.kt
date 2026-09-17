@@ -37,8 +37,8 @@ class DeviceModuleConfiguration {
 
     @Bean
     fun deviceCollectionService(catalog: DeviceCatalogService, runtimeMapper: DeviceRuntimeMapper,
-        engine: CollectionEngine, telemetry: TelemetryRepository) =
-        DeviceCollectionService(catalog, runtimeMapper, engine, telemetry)
+        engine: CollectionEngine, telemetry: TelemetryRepository, realtimeHub: DeviceRealtimeHub) =
+        DeviceCollectionService(catalog, runtimeMapper, engine, telemetry, realtimeHub)
 
     @Bean
     fun deviceDiagnosticsService(catalog: DeviceCatalogService, drivers: DriverRegistry, runtimeMapper: DeviceRuntimeMapper) =

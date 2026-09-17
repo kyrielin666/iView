@@ -2,6 +2,7 @@ package ai.moying.iview.device
 
 import ai.moying.iview.common.ApiResponse
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 import java.time.Instant
 import jakarta.servlet.http.HttpServletRequest
 import kotlinx.coroutines.runBlocking
@@ -320,9 +322,14 @@ class DeviceProtocolController(
     private val collection: DeviceCollectionService,
     private val sessions: DeviceSessionPool,
     private val scope: DeviceScopeGuard,
+    private val realtimeHub: DeviceRealtimeHub,
 ) {
     @GetMapping("/statistics")
-    fun statistics() = ApiResponse.success(collection.statistics(sessions.statuses().size))
+    fun statistics(request: HttpServletRequest): ApiResponse<DeviceStatisticsView> {
+        val allowed = scope.allowed(request)
+        val count = sessions.statuses().count { allowed == null || it.deviceId in allowed }
+        return ApiResponse.success(collection.statistics(count, allowed))
+    }
 
     @PostMapping("/{id}/test")
     fun test(@PathVariable id: Long, request: HttpServletRequest) = ApiResponse.success(scope.require(request, id).let { runBlocking { diagnostics.test(id) } })
@@ -339,6 +346,12 @@ class DeviceProtocolController(
 
     @GetMapping("/{id}/realtime")
     fun realtime(@PathVariable id: Long, request: HttpServletRequest) = ApiResponse.success(scope.require(request, id).let { collection.realtime(id) })
+
+    @GetMapping("/{id}/subscription", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
+    fun subscription(@PathVariable id: Long, request: HttpServletRequest): SseEmitter {
+        scope.require(request, id)
+        return realtimeHub.subscribe(id)
+    }
 
     @GetMapping("/{id}/history")
     fun history(

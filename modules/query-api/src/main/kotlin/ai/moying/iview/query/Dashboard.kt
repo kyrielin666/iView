@@ -29,6 +29,15 @@ class DashboardService(private val repository: DashboardRepository, private val 
         val current = get(id)
         return update(id, DashboardDraft(current.folderId, current.modelId, current.name, current.description, contentJson))
     }
+    fun copy(id: Long, name: String): Dashboard {
+        val current = get(id)
+        return create(DashboardDraft(current.folderId, current.modelId, name, current.description, current.contentJson))
+    }
+    fun move(id: Long, folderId: Long?): Dashboard {
+        val current = get(id)
+        folderId?.let(::getFolder)
+        return update(id, DashboardDraft(folderId, current.modelId, current.name, current.description, current.contentJson))
+    }
     fun publish(id: Long): Dashboard { val snapshot = repository.createSnapshot(get(id)); return repository.markPublished(id, snapshot.id) ?: throw DashboardNotFoundException("看板不存在: $id") }
     fun snapshots(id: Long) = repository.listSnapshots(get(id).id)
     fun published(id: Long): DashboardSnapshot {
