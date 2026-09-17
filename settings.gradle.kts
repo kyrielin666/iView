@@ -25,6 +25,7 @@ include(
     ":modules:protocol-mitsubishi-mc4e",
     ":modules:protocol-mitsubishi-mca1e",
     ":modules:protocol-omron-fins",
+    ":modules:protocol-omron-fins-udp",
     ":modules:protocol-s7",
     ":modules:protocol-opcua",
     ":modules:collector",

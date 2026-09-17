@@ -7,6 +7,7 @@ import ai.moying.iview.protocol.mitsubishi.mc3e.MitsubishiMc3eDriver
 import ai.moying.iview.protocol.mitsubishi.mc4e.MitsubishiMc4eDriver
 import ai.moying.iview.protocol.mitsubishi.mca1e.MitsubishiMcA1eDriver
 import ai.moying.iview.protocol.omron.fins.OmronFinsTcpDriver
+import ai.moying.iview.protocol.omron.finsudp.OmronFinsUdpDriver
 import ai.moying.iview.protocol.opcua.OpcUaDriver
 import ai.moying.iview.protocol.s7.S7Driver
 import org.springframework.context.annotation.Bean
@@ -31,6 +32,9 @@ class ProtocolConfiguration {
 
     @Bean
     fun omronFinsTcpDriver(): ProtocolDriver = OmronFinsTcpDriver()
+
+    @Bean
+    fun omronFinsUdpDriver(): ProtocolDriver = OmronFinsUdpDriver()
 
     @Bean
     fun s7Driver(): ProtocolDriver = S7Driver()

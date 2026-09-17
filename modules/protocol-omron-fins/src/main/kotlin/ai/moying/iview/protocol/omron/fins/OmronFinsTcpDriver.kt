@@ -84,9 +84,51 @@ private class FinsTcpSession(private val device: DeviceDefinition, private val c
     override val connected get() = lock.withLock { socket?.let { it.isConnected && !it.isClosed } == true }
     fun open() = lock.withLock { connectSocket() }
 
-    override suspend fun read(points: List<PointDefinition>): List<PointValue> = withContext(Dispatchers.IO) { points.map { point ->
-        val observed = Instant.now(); runCatching { readPoint(point) }.fold({ PointValue(device.id, point.id, observed, Instant.now(), it, ValueQuality.GOOD, OmronFinsTcpDriver.PROTOCOL_TYPE) }, { error -> PointValue(device.id, point.id, observed, Instant.now(), null, quality(error), OmronFinsTcpDriver.PROTOCOL_TYPE, error.message) })
-    } }
+    override suspend fun read(points: List<PointDefinition>): List<PointValue> = withContext(Dispatchers.IO) {
+        /*
+         * FINS memory-area-read accepts a range of words.  Planning compatible word
+         * points here cuts request count substantially for normal PLC polling while
+         * preserving the public contract: output order, individual scaling and an
+         * individual error value for malformed/bit-addressed points are unchanged.
+         */
+        val observed = Instant.now()
+        val results = arrayOfNulls<PointValue>(points.size)
+        val mergeable = mutableListOf<FinsReadItem>()
+        points.forEachIndexed { index, point ->
+            runCatching { FinsPoint.from(point) }.fold({ cfg ->
+                if (!cfg.address.bitAccess) mergeable += FinsReadItem(index, point, cfg) else results[index] = readValue(point, observed)
+            }, { error -> results[index] = failedValue(point, observed, error) })
+        }
+        val planned = mergeable.sortedWith(compareBy<FinsReadItem> { it.config.address.area }.thenBy { it.config.address.word })
+        var cursor = 0
+        while (cursor < planned.size) {
+            val item = planned[cursor]
+            val group = mutableListOf(item)
+            val start = item.config.address.word
+            var endExclusive = start + item.point.dataType.words()
+            var next = cursor + 1
+            while (next < planned.size) {
+                val candidate = planned[next]
+                if (candidate.config.address.area != item.config.address.area) break
+                val candidateStart = candidate.config.address.word
+                val candidateEnd = candidateStart + candidate.point.dataType.words()
+                // A small hole is intentionally allowed: it still replaces many PLC round trips.
+                if (candidateStart > endExclusive + 16 || candidateEnd - start > MAX_MERGED_WORDS) break
+                group += candidate; endExclusive = maxOf(endExclusive, candidateEnd); next++
+            }
+            runCatching {
+                val data = request(0x0101, FinsAddress(item.config.address.area, start, 0, false, false), endExclusive - start, byteArrayOf())
+                group.forEach { grouped ->
+                    val offset = (grouped.config.address.word - start) * 2
+                    val length = grouped.point.dataType.words() * 2
+                    val raw = decodeFins(data.copyOfRange(offset, offset + length), grouped.point.dataType, grouped.config.order)
+                    results[grouped.index] = PointValue(device.id, grouped.point.id, observed, Instant.now(), grouped.config.scaleRead(raw), ValueQuality.GOOD, OmronFinsTcpDriver.PROTOCOL_TYPE)
+                }
+            }.onFailure { error -> group.forEach { grouped -> results[grouped.index] = failedValue(grouped.point, observed, error) } }
+            cursor = next
+        }
+        results.mapIndexed { index, value -> value ?: readValue(points[index], observed) }
+    }
     override suspend fun write(writes: List<PointWrite>): List<WriteResult> = withContext(Dispatchers.IO) { writes.map { write ->
         if (write.point.access == PointAccess.READ_ONLY) WriteResult(false, "点位 ${write.point.code} 是只读点") else runCatching { writePoint(write.point, write.value) }.fold({ WriteResult(true) }, { WriteResult(false, it.message) })
     } }
@@ -97,6 +139,11 @@ private class FinsTcpSession(private val device: DeviceDefinition, private val c
         val raw = if (cfg.address.bitAccess) { require(data.isNotEmpty()) { "FINS 位读取响应为空" }; data[0].toInt() != 0 } else decodeFins(data, point.dataType, cfg.order)
         return cfg.scaleRead(raw)
     }
+    private fun readValue(point: PointDefinition, observed: Instant) = runCatching { readPoint(point) }.fold(
+        { PointValue(device.id, point.id, observed, Instant.now(), it, ValueQuality.GOOD, OmronFinsTcpDriver.PROTOCOL_TYPE) },
+        { error -> failedValue(point, observed, error) },
+    )
+    private fun failedValue(point: PointDefinition, observed: Instant, error: Throwable) = PointValue(device.id, point.id, observed, Instant.now(), null, quality(error), OmronFinsTcpDriver.PROTOCOL_TYPE, error.message)
     private fun writePoint(point: PointDefinition, value: Any?) {
         val cfg = FinsPoint.from(point); require(!cfg.address.readOnly) { "该 FINS 内存区只读" }
         val data = if (cfg.address.bitAccess) byteArrayOf(if (value.bool()) 1 else 0) else encodeFins(cfg.scaleWrite(value), point.dataType, cfg.order)
@@ -126,6 +173,8 @@ private class FinsTcpSession(private val device: DeviceDefinition, private val c
     override fun close() = lock.withLock { closeSocket() }
     private fun closeSocket() { runCatching { socket?.close() }; socket = null; input = null; output = null }
     private fun quality(error: Throwable) = when (error) { is SocketTimeoutException -> ValueQuality.TIMEOUT; is IOException -> ValueQuality.OFFLINE; is IllegalArgumentException -> ValueQuality.BAD_CONFIGURATION; else -> ValueQuality.BAD_RESPONSE }
+    private data class FinsReadItem(val index: Int, val point: PointDefinition, val config: FinsPoint)
+    private companion object { const val MAX_MERGED_WORDS = 500 }
 }
 
 private data class FinsPoint(val address: FinsAddress, val order: FinsByteOrder, val multiplier: Double, val offset: Double) {

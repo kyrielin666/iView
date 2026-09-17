@@ -62,6 +62,29 @@ class OmronFinsTcpDriverTest {
     }
 
     @Test
+    fun `adjacent FINS word points are merged into one memory area read`() = runBlocking {
+        ServerSocket(0).use { server ->
+            thread(isDaemon = true) {
+                server.accept().use { socket ->
+                    val input = DataInputStream(socket.getInputStream()); val output = DataOutputStream(socket.getOutputStream())
+                    readPacket(input); output.write(tcpPacket(1, intBytes(1) + intBytes(10))); output.flush()
+                    val request = readPacket(input)
+                    // command header(10) + 0101 + address(4) + word count(2)
+                    assertEquals(0x82, request.payload[12].toInt() and 0xff)
+                    assertEquals(100, ((request.payload[13].toInt() and 0xff) shl 8) or (request.payload[14].toInt() and 0xff))
+                    assertEquals(3, ((request.payload[16].toInt() and 0xff) shl 8) or (request.payload[17].toInt() and 0xff))
+                    respondFins(output, request.payload, byteArrayOf(0, 1, 0, 2, 0, 3))
+                }
+            }
+            driver.connect(device(mapOf("host" to "127.0.0.1", "port" to server.localPort.toString(), "node_number" to "10"))).use { session ->
+                val values = session.read(listOf(point(id = 10, address = "D100"), point(id = 11, address = "D101"), point(id = 12, address = "D102")))
+                assertEquals(listOf(1, 2, 3), values.map { it.value })
+                assertTrue(values.all { it.quality == ValueQuality.GOOD })
+            }
+        }
+    }
+
+    @Test
     fun `PLC end code becomes bad response quality`() = runBlocking {
         ServerSocket(0).use { server ->
             thread(isDaemon = true) {
@@ -84,5 +107,5 @@ class OmronFinsTcpDriverTest {
     private fun intBytes(value: Int) = byteArrayOf((value ushr 24).toByte(), (value ushr 16).toByte(), (value ushr 8).toByte(), value.toByte())
     private fun int32(data: ByteArray, offset: Int) = ((data[offset].toInt() and 0xff) shl 24) or ((data[offset + 1].toInt() and 0xff) shl 16) or ((data[offset + 2].toInt() and 0xff) shl 8) or (data[offset + 3].toInt() and 0xff)
     private fun device(properties: Map<String, String>) = DeviceDefinition(DeviceId(1), "OMRON_001", "欧姆龙 PLC", "omron_fins", true, properties)
-    private fun point() = PointDefinition(PointId(10), DeviceId(1), "speed", "速度", "D100", PointDataType.UINT16, PointAccess.READ_WRITE, Duration.ofSeconds(1), mapOf("memoryArea" to "DM", "byteOrder" to "big"))
+    private fun point(id: Long = 10, address: String = "D100") = PointDefinition(PointId(id), DeviceId(1), "speed$id", "速度", address, PointDataType.UINT16, PointAccess.READ_WRITE, Duration.ofSeconds(1), mapOf("memoryArea" to "DM", "byteOrder" to "big"))
 }
