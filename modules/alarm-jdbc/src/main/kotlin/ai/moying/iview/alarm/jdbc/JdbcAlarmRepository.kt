@@ -42,6 +42,9 @@ class JdbcAlarmRepository(private val jdbc: NamedParameterJdbcTemplate) : AlarmR
         "SELECT * FROM iview_device_alarm WHERE device_id=:deviceId AND status='ACTIVE' ORDER BY id DESC LIMIT 1",
         mapOf("deviceId" to deviceId), alarmMapper,
     )
+    override fun findAlarm(id: Long): DeviceAlarm? = single(
+        "SELECT * FROM iview_device_alarm WHERE id=:id", mapOf("id" to id), alarmMapper,
+    )
     override fun createAlarm(deviceId: Long, eventAt: Instant, content: String?, category: Int?): DeviceAlarm {
         val id = alarmInsert.executeAndReturnKey(mapOf(
             "device_id" to deviceId, "abnormal_at" to eventAt, "alarm_content" to content,
@@ -56,11 +59,21 @@ class JdbcAlarmRepository(private val jdbc: NamedParameterJdbcTemplate) : AlarmR
         )
         return if (updated == 0) null else single("SELECT * FROM iview_device_alarm WHERE id=:id", mapOf("id" to id), alarmMapper)
     }
+    override fun acknowledge(id: Long, eventAt: Instant, actor: String, note: String?): DeviceAlarm? {
+        val updated = jdbc.update(
+            "UPDATE iview_device_alarm SET acknowledged_at=:eventAt, acknowledged_by=:actor, acknowledgement=:note, updated_at=CURRENT_TIMESTAMP WHERE id=:id AND acknowledged_at IS NULL",
+            mapOf("id" to id, "eventAt" to eventAt, "actor" to actor, "note" to note),
+        )
+        return if (updated == 0) findAlarm(id) else findAlarm(id)
+    }
     override fun listAlarms(filter: DeviceAlarmFilter): AlarmPage<DeviceAlarm> {
         val clauses = mutableListOf<String>()
         val params = mutableMapOf<String, Any>("limit" to filter.pageSize, "offset" to (filter.page - 1) * filter.pageSize)
         filter.deviceId?.let { clauses += "device_id=:deviceId"; params["deviceId"] = it }
         filter.status?.let { clauses += "status=:status"; params["status"] = it.name }
+        filter.allowedDeviceIds?.let { allowed ->
+            if (allowed.isEmpty()) clauses += "1=0" else { clauses += "device_id IN (:allowedDeviceIds)"; params["allowedDeviceIds"] = allowed }
+        }
         val where = if (clauses.isEmpty()) "" else "WHERE ${clauses.joinToString(" AND ")}"
         return AlarmPage(
             jdbc.query("SELECT * FROM iview_device_alarm $where ORDER BY id DESC LIMIT :limit OFFSET :offset", params, alarmMapper),
@@ -87,5 +100,6 @@ class JdbcAlarmRepository(private val jdbc: NamedParameterJdbcTemplate) : AlarmR
         rs.getLong("id"), rs.getLong("device_id"), instant(rs, "abnormal_at"),
         rs.getTimestamp("recovered_at")?.toInstant(), rs.getString("alarm_content"), (rs.getObject("alarm_category") as? Number)?.toInt(),
         AlarmStatus.valueOf(rs.getString("status")), instant(rs, "created_at"), instant(rs, "updated_at"),
+        rs.getTimestamp("acknowledged_at")?.toInstant(), rs.getString("acknowledged_by"), rs.getString("acknowledgement"),
     ) }
 }

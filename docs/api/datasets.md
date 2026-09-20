@@ -10,6 +10,7 @@
 | `POST /api/v1/datasets/{id}/copy` | 复制数据集，请求体传入新 `name` |
 | `PUT /api/v1/datasets/{id}/folder` | 移动到 `folder_id`；传 `null` 回到根目录 |
 | `POST /api/v1/datasets/{id}/preview` | 用关联数据源执行受限预览查询；请求体可传 `max_rows`、`variables` |
+| `POST /api/v1/datasets/{id}/query` | 按字段白名单执行投影、筛选、分组聚合、HAVING、排序和分页；请求体传 `fields`、`filters`、`group_by`、`aggregations`、`having`、`order_by`、`limit`、`offset`、`variables` |
 | `POST /api/v1/datasets/{id}/schema` | 读取结果字段结构，不取业务数据；请求体传 `variables` |
 | `POST /api/v1/datasets/{id}/lineage` | 读取字段级 JDBC 元数据血缘；请求体传 `variables` |
 | `POST /api/v1/datasets/{id}/explain` | 读取 PostgreSQL JSON 执行计划；请求体传 `variables` |
@@ -31,3 +32,22 @@
 数据集创建和更新时都会按数据源类型校验查询定义；预览默认 1000 行、最大 10000 行。SQL 中的 `{{变量名}}` 会转为 JDBC 参数；JSON 查询先完成语法解析，再只替换字符串值中的变量，因此变量不能改变请求方法、字段结构或注入查询对象。Explain 仅适用于 PostgreSQL，其他类型返回明确的能力说明。导出统一以最多 10,000 行 CSV 返回。
 
 字段血缘响应包含 `fields`、`nodes`、`edges` 和汇总信息。当前按实际查询结果结构与数据源建立字段来源关系；复杂表达式和嵌套 JSON 不会伪造成数据库级精确血缘。
+
+结构化查询的筛选操作包括 `equals`、`not_equals`、`greater_than`、`greater_than_or_equal`、`less_than`、`less_than_or_equal`、`in`、`not_in`、`like`、`is_null` 和 `is_not_null`。请求字段必须存在于实际结果结构中，最大返回 1,000 行。
+
+PostgreSQL 会把投影、筛选、`group by`、`count/sum/avg/min/max`、`having`、排序、分页和总数统计包装在原始只读数据集 SQL 外层并下推执行；因此原始数据集 SQL 可以安全表达多表 `join`，可视化查询层继续在其结果字段白名单上工作。字段名、聚合函数和别名不会直接信任请求文本，值全部使用 JDBC 参数绑定。HTTP、文件和 MongoDB 使用最多 10,000 行的便携内存执行路径，并明确拒绝分组聚合请求，避免返回不完整的聚合结果。
+
+聚合示例：
+
+```json
+{
+  "filters": [{"field":"state","operator":"not_equals","value":"offline"}],
+  "group_by": ["line"],
+  "aggregations": [{"field":"quantity","function":"sum","alias":"total_quantity"}],
+  "having": [{"field":"total_quantity","operator":"greater_than","value":"100"}],
+  "order_by": [{"field":"total_quantity","direction":"DESC"}],
+  "limit": 100,
+  "offset": 0,
+  "variables": {}
+}
+```

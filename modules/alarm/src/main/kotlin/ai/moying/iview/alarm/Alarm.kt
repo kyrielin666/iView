@@ -33,6 +33,9 @@ data class DeviceAlarm(
     val status: AlarmStatus,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val acknowledgedAt: Instant? = null,
+    val acknowledgedBy: String? = null,
+    val acknowledgement: String? = null,
 )
 
 data class DeviceAlarmFilter(
@@ -40,6 +43,8 @@ data class DeviceAlarmFilter(
     val pageSize: Int = 20,
     val deviceId: Long? = null,
     val status: AlarmStatus? = null,
+    /** null means unrestricted; an empty set means no device access. */
+    val allowedDeviceIds: Set<Long>? = null,
 )
 
 data class AlarmPage<T>(val list: List<T>, val total: Long, val page: Int, val pageSize: Int)
@@ -52,8 +57,10 @@ interface AlarmRepository {
     fun deleteRule(id: Long): Boolean
 
     fun findActive(deviceId: Long): DeviceAlarm?
+    fun findAlarm(id: Long): DeviceAlarm?
     fun createAlarm(deviceId: Long, eventAt: Instant, content: String?, category: Int?): DeviceAlarm
     fun recover(id: Long, eventAt: Instant): DeviceAlarm?
+    fun acknowledge(id: Long, eventAt: Instant, actor: String, note: String?): DeviceAlarm?
     fun listAlarms(filter: DeviceAlarmFilter): AlarmPage<DeviceAlarm>
     fun deleteBefore(cutoff: Instant): Int
 }
@@ -85,7 +92,18 @@ class AlarmService(private val repository: AlarmRepository) {
     }
 
     fun listAlarms(filter: DeviceAlarmFilter) = repository.listAlarms(filter.normalized())
+    fun getAlarm(id: Long) = repository.findAlarm(id) ?: throw AlarmNotFoundException("告警不存在: $id")
     fun cleanupBefore(cutoff: Instant): Int = repository.deleteBefore(cutoff)
+
+    fun acknowledge(id: Long, eventAt: Instant, actor: String, note: String?): DeviceAlarm {
+        val current = getAlarm(id)
+        if (current.acknowledgedAt != null) return current
+        val normalizedActor = actor.trim()
+        val normalizedNote = note?.trim()?.ifBlank { null }
+        if (normalizedActor.isBlank() || normalizedActor.length > 100) throw AlarmValidationException("确认人不能为空且不能超过100位")
+        if ((normalizedNote?.length ?: 0) > 500) throw AlarmValidationException("确认说明不能超过500位")
+        return repository.acknowledge(id, eventAt, normalizedActor, normalizedNote) ?: throw AlarmNotFoundException("告警不存在: $id")
+    }
 
     fun markAbnormal(deviceId: Long, eventAt: Instant, content: String?): DeviceAlarm? {
         requireDeviceId(deviceId)

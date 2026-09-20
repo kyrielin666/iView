@@ -13,6 +13,10 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.time.Instant
+import jakarta.servlet.http.HttpServletRequest
+import ai.moying.iview.device.DeviceScopeGuard
+import ai.moying.iview.identity.AuthUser
+import ai.moying.iview.identity.AuthenticationException
 
 class AlarmRuleRequest {
     var pattern: String = ""
@@ -20,6 +24,7 @@ class AlarmRuleRequest {
     var priority: Int? = null
     var enabled: Int? = null
 }
+class AlarmAcknowledgeRequest { var note: String? = null }
 
 @RestController
 @RequestMapping("/api/v1/device-alarm-classification-rules")
@@ -48,14 +53,22 @@ class AlarmRuleController(private val service: AlarmService) {
 
 @RestController
 @RequestMapping("/api/v1/device-alarms")
-class DeviceAlarmController(private val service: AlarmService) {
+class DeviceAlarmController(private val service: AlarmService, private val scope: DeviceScopeGuard) {
     @GetMapping
     fun list(
         @RequestParam(defaultValue = "1") page: Int,
         @RequestParam(name = "page_size", defaultValue = "20") pageSize: Int,
         @RequestParam(name = "device_id", required = false) deviceId: Long?,
-        @RequestParam(required = false) status: AlarmStatus?,
-    ) = ApiResponse.success(service.listAlarms(DeviceAlarmFilter(page, pageSize, deviceId, status)))
+        @RequestParam(required = false) status: AlarmStatus?, request: HttpServletRequest,
+    ) = ApiResponse.success(service.listAlarms(DeviceAlarmFilter(page, pageSize, deviceId, status, scope.allowed(request))))
+
+    @PostMapping("/{id}/acknowledge")
+    fun acknowledge(@PathVariable id: Long, @RequestBody request: AlarmAcknowledgeRequest, servletRequest: HttpServletRequest): ApiResponse<DeviceAlarm> {
+        val alarm = service.getAlarm(id)
+        scope.require(servletRequest, alarm.deviceId)
+        val user = servletRequest.getAttribute("iview.user") as? AuthUser ?: throw AuthenticationException("请先登录")
+        return ApiResponse.success(service.acknowledge(id, Instant.now(), user.username, request.note))
+    }
 
     /** Removes historical alarm rows before the supplied UTC instant. The cutoff is mandatory. */
     @DeleteMapping("/cleanup")

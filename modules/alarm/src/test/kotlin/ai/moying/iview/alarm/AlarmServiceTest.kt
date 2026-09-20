@@ -19,6 +19,9 @@ class AlarmServiceTest {
         val recovered = service.markNormal(7, now.plusSeconds(5))
         assertEquals(AlarmStatus.RECOVERED, recovered?.status)
         assertEquals(now.plusSeconds(5), recovered?.recoveredAt)
+        val acknowledged = service.acknowledge(requireNotNull(recovered).id, now.plusSeconds(6), "operator", "现场已检查")
+        assertEquals("operator", acknowledged.acknowledgedBy)
+        assertEquals("现场已检查", acknowledged.acknowledgement)
     }
 }
 
@@ -32,8 +35,10 @@ private class MemoryAlarms : AlarmRepository {
     override fun updateRule(id: Long, command: AlarmClassificationRuleCommand) = findRule(id)?.let { old -> old.copy(pattern = command.pattern, category = command.category, priority = command.priority, enabled = command.enabled).also { next -> rules[rules.indexOf(old)] = next } }
     override fun deleteRule(id: Long) = rules.removeIf { it.id == id }
     override fun findActive(deviceId: Long) = alarms.lastOrNull { it.deviceId == deviceId && it.status == AlarmStatus.ACTIVE }
+    override fun findAlarm(id: Long) = alarms.find { it.id == id }
     override fun createAlarm(deviceId: Long, eventAt: Instant, content: String?, category: Int?) = DeviceAlarm(++sequence, deviceId, eventAt, null, content, category, AlarmStatus.ACTIVE, eventAt, eventAt).also(alarms::add)
     override fun recover(id: Long, eventAt: Instant) = alarms.find { it.id == id }?.let { old -> old.copy(recoveredAt = eventAt, status = AlarmStatus.RECOVERED, updatedAt = eventAt).also { next -> alarms[alarms.indexOf(old)] = next } }
+    override fun acknowledge(id: Long, eventAt: Instant, actor: String, note: String?) = alarms.find { it.id == id }?.let { old -> old.copy(acknowledgedAt = eventAt, acknowledgedBy = actor, acknowledgement = note, updatedAt = eventAt).also { next -> alarms[alarms.indexOf(old)] = next } }
     override fun listAlarms(filter: DeviceAlarmFilter) = AlarmPage(alarms.toList(), alarms.size.toLong(), filter.page, filter.pageSize)
     override fun deleteBefore(cutoff: Instant) = 0
 }

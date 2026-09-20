@@ -9,11 +9,12 @@ import java.math.BigDecimal
  * dataset schema; this layer never interpolates request values into source SQL.
  *
  * The source execution is intentionally capped at [SOURCE_ROW_LIMIT]. This is a
- * portable fallback for HTTP, file and Mongo sources. PostgreSQL push-down for
- * joins/grouping/having remains a separate, planned capability.
+ * portable fallback for HTTP, file and Mongo sources. PostgreSQL requests are
+ * pushed down by [DataSourceExecutionService].
  */
 class StructuredDatasetQueryService {
     fun execute(result: SqlResult, request: DatasetStructuredQueryRequest): StructuredDatasetQueryResult {
+        requireRequest(request.groupBy.isEmpty() && request.aggregations.isEmpty() && request.having.isEmpty(), "分组、聚合和 HAVING 仅支持 PostgreSQL 数据源下推")
         val allFields = result.columns.map(SchemaColumn::name)
         val fields = request.fields.ifEmpty { allFields }
         requireRequest(fields.isNotEmpty() || allFields.isEmpty(), "查询字段不能为空")
@@ -79,11 +80,12 @@ class StructuredDatasetQueryService {
         }
     }
 
-    private fun equalsValue(value: Any?, expected: String?): Boolean = when {
-        value == null -> expected == null
-        expected == null -> false
-        decimal(value)?.let { actual -> decimal(expected)?.let { actual.compareTo(it) == 0 } } != null -> true
-        else -> value.toString() == expected
+    private fun equalsValue(value: Any?, expected: String?): Boolean {
+        if (value == null) return expected == null
+        if (expected == null) return false
+        val actualNumber = decimal(value)
+        val expectedNumber = decimal(expected)
+        return if (actualNumber != null && expectedNumber != null) actualNumber.compareTo(expectedNumber) == 0 else value.toString() == expected
     }
 
     private fun compareValueToText(value: Any?, expected: String?): Int {
@@ -125,10 +127,19 @@ class StructuredDatasetQueryService {
 class DatasetStructuredQueryRequest {
     var fields: List<String> = emptyList()
     var filters: List<DatasetFilterRequest> = emptyList()
+    var groupBy: List<String> = emptyList()
+    var aggregations: List<DatasetAggregationRequest> = emptyList()
+    var having: List<DatasetFilterRequest> = emptyList()
     var orderBy: List<DatasetSortRequest> = emptyList()
     var limit: Int = 100
     var offset: Int = 0
     var variables: Map<String, String> = emptyMap()
+}
+
+class DatasetAggregationRequest {
+    var field: String? = null
+    var function: String = "count"
+    var alias: String = "count"
 }
 
 class DatasetFilterRequest {

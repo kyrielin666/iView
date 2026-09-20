@@ -4,6 +4,8 @@ param(
     [ValidateRange(1024, 65535)][int]$FrontendPort = 3000,
     [string]$JavaHome = $env:JAVA_HOME,
     [string]$NodePath = "",
+    [ValidateRange(1, 1024)][int]$LogMaxSizeMb = 20,
+    [ValidateRange(1, 100)][int]$LogKeepFiles = 10,
     [switch]$Build
 )
 
@@ -42,6 +44,14 @@ function Write-Pid([string]$Name, [int]$ProcessId) {
     @{ id = $ProcessId; started_at = $process.StartTime.ToUniversalTime().ToString("O"); marker = "iview" } |
         ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $PidRoot "$Name.pid") -NoNewline -Encoding utf8
 }
+function Rotate-Log([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path) -or (Get-Item -LiteralPath $Path).Length -lt ($LogMaxSizeMb * 1MB)) { return }
+    for ($index = $LogKeepFiles - 1; $index -ge 1; $index--) {
+        $source = "$Path.$index"; $target = "$Path.$($index + 1)"
+        if (Test-Path -LiteralPath $source) { Move-Item -LiteralPath $source -Destination $target -Force }
+    }
+    Move-Item -LiteralPath $Path -Destination "$Path.1" -Force
+}
 
 if (-not (Test-Path $FrontendRoot)) { throw "未找到前端目录：$FrontendRoot" }
 New-Item -ItemType Directory -Force -Path $LogRoot, $PidRoot | Out-Null
@@ -59,6 +69,7 @@ if (-not $jar) { throw "没有找到后端可执行 Jar。请先运行 Build-iVi
 $java = Find-Java; $node = Find-Node
 $backendLog = Join-Path $LogRoot "backend.log"; $backendError = Join-Path $LogRoot "backend.err.log"
 $frontendLog = Join-Path $LogRoot "frontend.log"; $frontendError = Join-Path $LogRoot "frontend.err.log"
+@($backendLog, $backendError, $frontendLog, $frontendError) | ForEach-Object { Rotate-Log $_ }
 $previousServerPort = $env:SERVER_PORT; $previousBackendUrl = $env:IVIEW_BACKEND_URL; $previousFrontendPort = $env:PORT
 try {
     $env:SERVER_PORT = "$BackendPort"

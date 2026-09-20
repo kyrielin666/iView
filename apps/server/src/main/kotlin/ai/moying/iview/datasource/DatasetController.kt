@@ -65,8 +65,7 @@ class DatasetController(
     @PostMapping("/{id}/query")
     fun query(@PathVariable id: Long, @RequestBody request: DatasetStructuredQueryRequest): ApiResponse<StructuredDatasetQueryResult> {
         val dataset = datasets.get(id)
-        val sourceResult = execution.queryDataset(dataset, StructuredDatasetQueryService.SOURCE_ROW_LIMIT, request.variables)
-        return ApiResponse.success(structuredQueries.execute(sourceResult, request))
+        return ApiResponse.success(execution.queryStructuredDataset(dataset, request, structuredQueries))
     }
     @PostMapping("/{id}/export") fun export(@PathVariable id: Long, @RequestBody(required = false) request: DatasetVariablesRequest?): ResponseEntity<ByteArray> {
         val dataset = datasets.get(id)

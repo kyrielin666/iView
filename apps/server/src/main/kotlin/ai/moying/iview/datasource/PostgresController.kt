@@ -25,7 +25,7 @@ class PostgresController {
 }
 
 internal fun execute(connection: java.sql.Connection, sql: String, values: List<String> = emptyList()): SqlResult = connection.prepareStatement(sql).use { statement ->
- values.forEachIndexed { index, value -> statement.setString(index + 1, value) }
+ values.forEachIndexed { index, value -> statement.setObject(index + 1, value, java.sql.Types.OTHER) }
  statement.queryTimeout = 30
  statement.executeQuery().use { rs ->
   val meta = rs.metaData

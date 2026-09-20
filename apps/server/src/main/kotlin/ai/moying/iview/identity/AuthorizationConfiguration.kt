@@ -7,6 +7,7 @@ import jakarta.servlet.http.HttpServletResponse
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpStatus
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.web.servlet.HandlerInterceptor
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
@@ -15,10 +16,26 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 class AuthorizationConfiguration(
     private val identities: IdentityService,
     private val mapper: ObjectMapper,
+    private val jdbc: JdbcTemplate,
     @Value("\${iview.auth.enforced:true}") private val enforced: Boolean,
 ) : WebMvcConfigurer {
     override fun addInterceptors(registry: InterceptorRegistry) {
         if (enforced) registry.addInterceptor(AuthorizationInterceptor(identities, mapper)).addPathPatterns("/api/**")
+        registry.addInterceptor(OperationAuditInterceptor(jdbc)).addPathPatterns("/api/**")
+    }
+}
+
+private class OperationAuditInterceptor(private val jdbc: JdbcTemplate) : HandlerInterceptor {
+    override fun afterCompletion(request: HttpServletRequest, response: HttpServletResponse, handler: Any, ex: Exception?) {
+        if (request.method !in setOf("POST", "PUT", "PATCH", "DELETE") || request.requestURI.startsWith("/api/v1/auth/")) return
+        val user = request.getAttribute("iview.user") as? AuthUser ?: return
+        runCatching {
+            jdbc.update(
+                "INSERT INTO iview_operation_audit(actor_user_id,action,target_type,target_id,detail) VALUES(?,?,?,?,?)",
+                user.id, request.method, "API", request.requestURI.take(128),
+                "status=${response.status}, remote=${request.remoteAddr.take(64)}, success=${ex == null && response.status < 400}".take(1000),
+            )
+        }
     }
 }
 
@@ -27,7 +44,8 @@ private class AuthorizationInterceptor(private val identities: IdentityService, 
         if (request.method == "OPTIONS" || request.requestURI in setOf("/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/logout")) return true
         return try {
             val user = identities.current(request.getHeader("Authorization"))
-            if (!identities.permitted(user, request.method, request.requestURI)) throw AuthorizationException("当前用户没有执行此操作的权限")
+            val selfService = request.method == "GET" && request.requestURI in setOf("/api/v1/auth/me", "/api/v1/navigation", "/api/v1/system/parameters")
+            if (!selfService && !identities.permitted(user, request.method, request.requestURI)) throw AuthorizationException("当前用户没有执行此操作的权限")
             request.setAttribute("iview.user", user); true
         } catch (error: AuthenticationException) { fail(response, HttpStatus.UNAUTHORIZED, error.message ?: "未登录") }
         catch (error: AuthorizationException) { fail(response, HttpStatus.FORBIDDEN, error.message ?: "无权限") }

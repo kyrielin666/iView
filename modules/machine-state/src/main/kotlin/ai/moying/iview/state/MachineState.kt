@@ -49,6 +49,26 @@ data class StoredMachineStateInterval(
     val ruleVersion: String,
 )
 
+data class MachineStateCorrection(
+    val id: Long,
+    val deviceId: Long,
+    val state: MachineState,
+    val startedAt: Instant,
+    val endedAt: Instant,
+    val reason: String,
+    val actor: String,
+    val createdAt: Instant,
+)
+
+data class MachineStateCorrectionCommand(
+    val deviceId: Long,
+    val state: MachineState,
+    val startedAt: Instant,
+    val endedAt: Instant,
+    val reason: String,
+    val actor: String,
+)
+
 interface MachineStateRepository {
     fun listRules(): List<MachineStateRule>
     fun findRule(id: Long): MachineStateRule?
@@ -58,6 +78,9 @@ interface MachineStateRepository {
     fun current(deviceId: Long): CurrentMachineState?
     fun record(next: CurrentMachineState): Boolean
     fun listIntervals(deviceId: Long, start: Instant, endExclusive: Instant): List<StoredMachineStateInterval>
+    fun listCorrections(deviceId: Long, start: Instant, endExclusive: Instant): List<MachineStateCorrection>
+    fun createCorrection(command: MachineStateCorrectionCommand): MachineStateCorrection
+    fun deleteCorrection(id: Long): Boolean
 }
 
 open class MachineStateException(message: String) : RuntimeException(message)
@@ -84,6 +107,17 @@ class MachineStateService(private val repository: MachineStateRepository) {
         if (!endExclusive.isAfter(start)) throw MachineStateValidationException("结束时间必须晚于开始时间")
         return repository.listIntervals(deviceId, start, endExclusive)
     }
+    fun corrections(deviceId: Long, start: Instant, endExclusive: Instant): List<MachineStateCorrection> {
+        if (!endExclusive.isAfter(start)) throw MachineStateValidationException("结束时间必须晚于开始时间")
+        return repository.listCorrections(deviceId, start, endExclusive)
+    }
+    fun correct(command: MachineStateCorrectionCommand): MachineStateCorrection {
+        if (command.deviceId <= 0 || !command.endedAt.isAfter(command.startedAt)) throw MachineStateValidationException("人工修正的设备和时间范围无效")
+        if (command.reason.trim().length !in 3..500) throw MachineStateValidationException("人工修正原因必须为 3-500 个字符")
+        if (command.actor.isBlank() || command.actor.length > 64) throw MachineStateValidationException("人工修正操作人无效")
+        return repository.createCorrection(command.copy(reason = command.reason.trim(), actor = command.actor.trim()))
+    }
+    fun deleteCorrection(id: Long) { if (!repository.deleteCorrection(id)) throw MachineStateNotFoundException("人工状态修正不存在: $id") }
 
     fun inspect(values: List<PointValue>) {
         val rules = repository.listRules().asSequence().filter { it.enabled }.associateBy { it.pointId }

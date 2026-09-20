@@ -29,6 +29,7 @@ class JdbcDataModelRepository(private val jdbc: NamedParameterJdbcTemplate, priv
     override fun delete(id: Long) = jdbc.update("DELETE FROM iview_data_model WHERE id=:id", mapOf("id" to id)) > 0
     override fun latestSchema(modelId: Long): DataModelSchema? = jdbc.query("SELECT * FROM iview_data_model_schema WHERE model_id=:id ORDER BY schema_version DESC", mapOf("id" to modelId), schemaMapper).firstOrNull()
     override fun listSchemas(modelId: Long): List<DataModelSchema> = jdbc.query("SELECT * FROM iview_data_model_schema WHERE model_id=:id ORDER BY schema_version DESC", mapOf("id" to modelId), schemaMapper)
+    override fun schema(modelId: Long, version: Int): DataModelSchema? = jdbc.query("SELECT * FROM iview_data_model_schema WHERE model_id=:id AND schema_version=:version", mapOf("id" to modelId, "version" to version), schemaMapper).firstOrNull()
     override fun appendSchema(modelId: Long, fields: List<DataModelField>, fingerprint: String): DataModelSchema {
         val version = (latestSchema(modelId)?.version ?: 0) + 1
         val id = schemaInsert.executeAndReturnKey(mapOf("model_id" to modelId, "schema_version" to version, "fields_json" to objectMapper.writeValueAsString(fields), "fingerprint" to fingerprint)).toLong()

@@ -15,6 +15,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.hamcrest.Matchers.hasItems
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -39,6 +40,30 @@ class IdentityApiTest {
         mockMvc.perform(post("/api/v1/auth/refresh").contentType(MediaType.APPLICATION_JSON).content("""{"refresh_token":"$renewedToken"}""")).andExpect(status().isUnauthorized)
     }
 
+    @Test fun `repeated password failures lock the account and are audited`() {
+        val login = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content("""{"username":"admin","password":"ChangeMe123!"}"""))
+            .andExpect(status().isOk).andReturn().response.contentAsString
+        val authorization = "Bearer ${objectMapper.readTree(login).path("data").path("access_token").asText()}"
+        val username = "locked${System.nanoTime().toString().takeLast(8)}"
+        val created = mockMvc.perform(post("/api/v1/admin/users").header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
+            .content("""{"username":"$username","display_name":"锁定测试","password":"LockedPass123!","enabled":true,"role_codes":["ADMIN"]}"""))
+            .andExpect(status().isCreated).andReturn().response.contentAsString
+        val userId = objectMapper.readTree(created).path("data").path("id").asLong()
+        repeat(5) {
+            mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content("""{"username":"$username","password":"wrong-password"}"""))
+                .andExpect(status().isUnauthorized)
+        }
+        mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content("""{"username":"$username","password":"LockedPass123!"}"""))
+            .andExpect(status().isUnauthorized).andExpect(jsonPath("$.msg").value("登录失败次数过多，账号暂时锁定"))
+        mockMvc.perform(get("/api/v1/admin/auth-audit").header("Authorization", authorization)).andExpect(status().isOk)
+            .andExpect(jsonPath("$.data[0].username").value(username)).andExpect(jsonPath("$.data[0].reason").value("LOCKED"))
+        mockMvc.perform(post("/api/v1/admin/users/$userId/unlock").header("Authorization", authorization)).andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.failed_login_count").value(0)).andExpect(jsonPath("$.data.locked_until").doesNotExist())
+        mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content("""{"username":"$username","password":"LockedPass123!"}"""))
+            .andExpect(status().isOk)
+        mockMvc.perform(delete("/api/v1/admin/users/$userId").header("Authorization", authorization)).andExpect(status().isOk)
+    }
+
     @Test fun `administrator manages roles users permissions and audit`() {
         val login = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content("""{"username":"admin","password":"ChangeMe123!"}""")).andExpect(status().isOk).andReturn().response.contentAsString
         val access = objectMapper.readTree(login).path("data").path("access_token").asText(); val authorization = "Bearer $access"
@@ -46,8 +71,14 @@ class IdentityApiTest {
         val permission = mockMvc.perform(post("/api/v1/admin/permissions").header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON).content("""{"code":"GET:/api/v1/devices/**","name":"读取设备"}"""))
             .andExpect(status().isCreated).andReturn().response.contentAsString
         val permissionId = objectMapper.readTree(permission).path("data").path("id").asLong()
-        val role = mockMvc.perform(post("/api/v1/admin/roles").header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON).content("""{"code":"VIEWER","name":"只读用户","permission_codes":["GET:/api/v1/devices/**"]}"""))
-            .andExpect(status().isCreated).andExpect(jsonPath("$.data.permissions[0]").value("GET:/api/v1/devices/**")).andReturn().response.contentAsString
+        val alarmPermission = mockMvc.perform(post("/api/v1/admin/permissions").header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON).content("""{"code":"GET:/api/v1/device-alarms","name":"读取告警"}"""))
+            .andExpect(status().isCreated).andReturn().response.contentAsString
+        val alarmPermissionId = objectMapper.readTree(alarmPermission).path("data").path("id").asLong()
+        val acknowledgePermission = mockMvc.perform(post("/api/v1/admin/permissions").header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON).content("""{"code":"POST:/api/v1/device-alarms/*/acknowledge","name":"确认告警"}"""))
+            .andExpect(status().isCreated).andReturn().response.contentAsString
+        val acknowledgePermissionId = objectMapper.readTree(acknowledgePermission).path("data").path("id").asLong()
+        val role = mockMvc.perform(post("/api/v1/admin/roles").header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON).content("""{"code":"VIEWER","name":"只读用户","permission_codes":["GET:/api/v1/devices/**","GET:/api/v1/device-alarms","POST:/api/v1/device-alarms/*/acknowledge"]}"""))
+            .andExpect(status().isCreated).andExpect(jsonPath("$.data.permissions", hasItems("GET:/api/v1/devices/**", "GET:/api/v1/device-alarms", "POST:/api/v1/device-alarms/*/acknowledge"))).andReturn().response.contentAsString
         val roleId = objectMapper.readTree(role).path("data").path("id").asLong()
         val suffix = System.nanoTime().toString().takeLast(8)
         jdbc.update("INSERT INTO iview_device_template(template_code,template_name,protocol_type,protocol_config,collect_interval_ms,timeout_ms,description) VALUES(?,?,?,?,?,?,?)", "scope$suffix", "范围模板", "MODBUS_TCP", "{}", 1000, 5000, "")
@@ -56,14 +87,27 @@ class IdentityApiTest {
         jdbc.update("INSERT INTO iview_device(device_sn,device_name,template_id,config_json,enabled,description) VALUES(?,?,?,?,?,?)", "scope-b$suffix", "范围设备 B", templateId, "{}", true, "")
         val scopedId = jdbc.queryForObject("SELECT id FROM iview_device WHERE device_sn=?", Long::class.java, "scope-a$suffix")!!
         val blockedId = jdbc.queryForObject("SELECT id FROM iview_device WHERE device_sn=?", Long::class.java, "scope-b$suffix")!!
+        jdbc.update("INSERT INTO iview_device_alarm(device_id,abnormal_at,alarm_content,status) VALUES(?,?,?,'ACTIVE')", scopedId, java.time.Instant.now(), "范围内告警")
+        jdbc.update("INSERT INTO iview_device_alarm(device_id,abnormal_at,alarm_content,status) VALUES(?,?,?,'ACTIVE')", blockedId, java.time.Instant.now(), "范围外告警")
+        val scopedAlarmId = jdbc.queryForObject("SELECT id FROM iview_device_alarm WHERE device_id=? ORDER BY id DESC LIMIT 1", Long::class.java, scopedId)!!
+        val blockedAlarmId = jdbc.queryForObject("SELECT id FROM iview_device_alarm WHERE device_id=? ORDER BY id DESC LIMIT 1", Long::class.java, blockedId)!!
         val user = mockMvc.perform(post("/api/v1/admin/users").header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON).content("""{"username":"viewer","display_name":"查看人员","password":"ViewerPass123!","enabled":true,"role_codes":["VIEWER"],"device_ids":[$scopedId]}"""))
             .andExpect(status().isCreated).andExpect(jsonPath("$.data.roles[0]").value("VIEWER")).andReturn().response.contentAsString
         val userId = objectMapper.readTree(user).path("data").path("id").asLong()
         val viewerLogin = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content("""{"username":"viewer","password":"ViewerPass123!"}""")).andExpect(status().isOk).andReturn().response.contentAsString
         val viewerAccess = objectMapper.readTree(viewerLogin).path("data").path("access_token").asText()
+        mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer $viewerAccess")).andExpect(status().isOk).andExpect(jsonPath("$.data.username").value("viewer"))
+        mockMvc.perform(get("/api/v1/navigation").header("Authorization", "Bearer $viewerAccess")).andExpect(status().isOk)
+            .andExpect(jsonPath("$.data[*].route", hasItems("devices", "alarms")))
         mockMvc.perform(get("/api/v1/devices").header("Authorization", "Bearer $viewerAccess")).andExpect(status().isOk).andExpect(jsonPath("$.data.total").value(1))
         mockMvc.perform(get("/api/v1/devices/$scopedId").header("Authorization", "Bearer $viewerAccess")).andExpect(status().isOk)
         mockMvc.perform(get("/api/v1/devices/$blockedId").header("Authorization", "Bearer $viewerAccess")).andExpect(status().isForbidden)
+        mockMvc.perform(get("/api/v1/device-alarms").header("Authorization", "Bearer $viewerAccess")).andExpect(status().isOk)
+            .andExpect(jsonPath("$.data.total").value(1)).andExpect(jsonPath("$.data.list[0].device_id").value(scopedId))
+        mockMvc.perform(post("/api/v1/device-alarms/$blockedAlarmId/acknowledge").header("Authorization", "Bearer $viewerAccess").contentType(MediaType.APPLICATION_JSON).content("""{"note":"越权确认"}"""))
+            .andExpect(status().isForbidden)
+        mockMvc.perform(post("/api/v1/device-alarms/$scopedAlarmId/acknowledge").header("Authorization", "Bearer $viewerAccess").contentType(MediaType.APPLICATION_JSON).content("""{"note":"已现场检查"}"""))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.acknowledged_by").value("viewer")).andExpect(jsonPath("$.data.acknowledgement").value("已现场检查"))
         mockMvc.perform(get("/api/v1/devices/statistics").header("Authorization", "Bearer $viewerAccess")).andExpect(status().isOk)
             .andExpect(jsonPath("$.data.total").value(1)).andExpect(jsonPath("$.data.enabled").value(1))
         mockMvc.perform(put("/api/v1/admin/users/$userId").header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
@@ -76,6 +120,8 @@ class IdentityApiTest {
         mockMvc.perform(delete("/api/v1/admin/users/$userId").header("Authorization", authorization)).andExpect(status().isOk)
         mockMvc.perform(delete("/api/v1/admin/roles/$roleId").header("Authorization", authorization)).andExpect(status().isOk)
         mockMvc.perform(delete("/api/v1/admin/permissions/$permissionId").header("Authorization", authorization)).andExpect(status().isOk)
+        mockMvc.perform(delete("/api/v1/admin/permissions/$alarmPermissionId").header("Authorization", authorization)).andExpect(status().isOk)
+        mockMvc.perform(delete("/api/v1/admin/permissions/$acknowledgePermissionId").header("Authorization", authorization)).andExpect(status().isOk)
         mockMvc.perform(get("/api/v1/admin/audit").header("Authorization", authorization)).andExpect(status().isOk).andExpect(jsonPath("$.data[0].actor").value("admin"))
     }
 }

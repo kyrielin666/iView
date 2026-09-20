@@ -28,4 +28,7 @@ private class InMemoryStates : MachineStateRepository {
     override fun deleteRule(id: Long) = rules.removeIf { it.id == id }; override fun current(deviceId: Long) = current[deviceId]
     override fun record(next: CurrentMachineState): Boolean { current[next.deviceId] = next; return true }
     override fun listIntervals(deviceId: Long, start: Instant, endExclusive: Instant) = emptyList<StoredMachineStateInterval>()
+    override fun listCorrections(deviceId: Long, start: Instant, endExclusive: Instant) = emptyList<MachineStateCorrection>()
+    override fun createCorrection(command: MachineStateCorrectionCommand) = MachineStateCorrection(++id, command.deviceId, command.state, command.startedAt, command.endedAt, command.reason, command.actor, Instant.EPOCH)
+    override fun deleteCorrection(id: Long) = false
 }

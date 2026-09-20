@@ -5,6 +5,8 @@ import ai.moying.iview.oee.MachineState
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.*
 import java.time.Instant
+import jakarta.servlet.http.HttpServletRequest
+import ai.moying.iview.identity.AuthUser
 
 class MachineStateRuleRequest {
     var templateId: Long? = null
@@ -42,4 +44,15 @@ class MachineStateRuleController(private val service: MachineStateService) {
 class DeviceMachineStateController(private val service: MachineStateService) {
     @GetMapping("/current") fun current(@PathVariable deviceId: Long) = ApiResponse.success(service.current(deviceId))
     @GetMapping("/intervals") fun intervals(@PathVariable deviceId: Long, @RequestParam start: Instant, @RequestParam end: Instant) = ApiResponse.success(service.intervals(deviceId, start, end))
+    @GetMapping("/corrections") fun corrections(@PathVariable deviceId: Long, @RequestParam start: Instant, @RequestParam end: Instant) = ApiResponse.success(service.corrections(deviceId, start, end))
+    @PostMapping("/corrections") @ResponseStatus(HttpStatus.CREATED) fun correct(@PathVariable deviceId: Long, @RequestBody body: MachineStateCorrectionRequest, request: HttpServletRequest): ApiResponse<MachineStateCorrection> {
+        val actor = (request.getAttribute("iview.user") as? AuthUser)?.username ?: throw MachineStateValidationException("无法识别人工修正操作人")
+        val start = body.start ?: throw MachineStateValidationException("人工修正必须指定开始时间")
+        val end = body.end ?: throw MachineStateValidationException("人工修正必须指定结束时间")
+        val state = runCatching { MachineState.valueOf(body.state.trim().uppercase()) }.getOrElse { throw MachineStateValidationException("人工修正状态无效") }
+        return ApiResponse.success(service.correct(MachineStateCorrectionCommand(deviceId, state, start, end, body.reason, actor)))
+    }
+    @DeleteMapping("/corrections/{id}") fun deleteCorrection(@PathVariable id: Long): ApiResponse<Nothing> { service.deleteCorrection(id); return ApiResponse.success() }
 }
+
+class MachineStateCorrectionRequest { var state = ""; var start: Instant? = null; var end: Instant? = null; var reason = "" }

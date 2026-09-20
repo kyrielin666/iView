@@ -2,6 +2,7 @@ package ai.moying.iview.identity
 
 import ai.moying.iview.common.ApiResponse
 import jakarta.annotation.PostConstruct
+import jakarta.servlet.http.HttpServletRequest
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.jdbc.core.JdbcTemplate
@@ -27,7 +28,7 @@ class AuthorizationException(message: String) : RuntimeException(message)
 @RestController
 @RequestMapping("/api/v1/auth")
 class IdentityController(private val identities: IdentityService) {
-    @PostMapping("/login") fun login(@RequestBody request: AuthRequest) = ApiResponse.success(identities.login(request.username, request.password))
+    @PostMapping("/login") fun login(@RequestBody request: AuthRequest, servletRequest: HttpServletRequest) = ApiResponse.success(identities.login(request.username, request.password, servletRequest.remoteAddr))
     @PostMapping("/refresh") fun refresh(@RequestBody request: RefreshRequest) = ApiResponse.success(identities.refresh(request.refreshToken))
     @PostMapping("/logout") fun logout(@RequestBody request: RefreshRequest): ApiResponse<Nothing> { identities.logout(request.refreshToken); return ApiResponse.success() }
     @GetMapping("/me") fun me(@RequestHeader("Authorization") authorization: String?) = ApiResponse.success(identities.current(authorization))
@@ -38,6 +39,8 @@ class IdentityService(
     private val jdbc: JdbcTemplate,
     @Value("\${iview.auth.token-secret}") private val tokenSecret: String,
     @Value("\${iview.auth.bootstrap-admin-password:}") private val bootstrapPassword: String,
+    @Value("\${iview.auth.max-failed-attempts:5}") private val maxFailedAttempts: Int,
+    @Value("\${iview.auth.lock-seconds:900}") private val lockSeconds: Long,
 ) {
     private val random = SecureRandom()
     private val pathMatcher = AntPathMatcher()
@@ -50,9 +53,30 @@ class IdentityService(
         jdbc.update("INSERT INTO iview_user_role(user_id,role_id) SELECT u.id,r.id FROM iview_user u CROSS JOIN iview_role r WHERE u.username='admin' AND r.role_code='ADMIN'")
         jdbc.update("INSERT INTO iview_role_permission(role_id,permission_id) SELECT r.id,p.id FROM iview_role r CROSS JOIN iview_permission p WHERE r.role_code='ADMIN' AND p.permission_code='*'")
     }
-    fun login(username: String, password: String): TokenPair {
-        val user = findByUsername(username.trim()) ?: throw AuthenticationException("用户名或密码不正确")
-        if (!user.enabled || !verify(password, user.passwordHash)) throw AuthenticationException("用户名或密码不正确")
+    @org.springframework.transaction.annotation.Transactional(noRollbackFor = [AuthenticationException::class])
+    fun login(username: String, password: String, remoteAddress: String = "unknown"): TokenPair {
+        val normalized = username.trim().lowercase().take(64)
+        val now = Instant.now()
+        var user = findByUsername(normalized)
+        if (user?.lockedUntil?.isAfter(now) == true) {
+            recordLogin(normalized, remoteAddress, false, "LOCKED")
+            throw AuthenticationException("登录失败次数过多，账号暂时锁定")
+        }
+        if (user != null && user.lockedUntil != null) {
+            jdbc.update("UPDATE iview_user SET failed_login_count=0,locked_until=NULL WHERE id=?", user.id)
+            user = user.copy(failedLoginCount = 0, lockedUntil = null)
+        }
+        if (user == null || !user.enabled || !verify(password, user.passwordHash)) {
+            if (user != null) {
+                val failures = user.failedLoginCount + 1
+                val lockedUntil = if (failures >= maxFailedAttempts.coerceAtLeast(2)) now.plusSeconds(lockSeconds.coerceAtLeast(60)) else null
+                jdbc.update("UPDATE iview_user SET failed_login_count=?,locked_until=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", failures, lockedUntil, user.id)
+            }
+            recordLogin(normalized, remoteAddress, false, if (user?.enabled == false) "DISABLED" else "BAD_CREDENTIALS")
+            throw AuthenticationException("用户名或密码不正确")
+        }
+        jdbc.update("UPDATE iview_user SET failed_login_count=0,locked_until=NULL,last_login_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?", now, user.id)
+        recordLogin(normalized, remoteAddress, true, "SUCCESS")
         return issue(user.view())
     }
     fun refresh(raw: String): TokenPair {
@@ -80,8 +104,8 @@ class IdentityService(
         return jdbc.query("SELECT device_id FROM iview_user_device_scope WHERE user_id=? ORDER BY device_id", { rs, _ -> rs.getLong(1) }, user.id).toSet()
     }
     private fun issue(user: AuthUser): TokenPair { val expires = Instant.now().plusSeconds(900); val access = encode(listOf(user.id.toString(), user.username, expires.epochSecond.toString())); val refresh = randomToken(); jdbc.update("INSERT INTO iview_refresh_token(user_id,token_hash,expires_at) VALUES(?,?,?)", user.id, sha256(refresh), Instant.now().plusSeconds(604800)); return TokenPair(access, refresh, 900, user) }
-    private fun findByUsername(username: String) = jdbc.query("SELECT id,username,password_hash,display_name,enabled FROM iview_user WHERE username=?", { rs, _ -> StoredUser(rs.getLong("id"),rs.getString("username"),rs.getString("password_hash"),rs.getString("display_name"),rs.getBoolean("enabled")) }, username).firstOrNull()
-    private fun findById(id: Long) = jdbc.query("SELECT id,username,password_hash,display_name,enabled FROM iview_user WHERE id=?", { rs, _ -> StoredUser(rs.getLong("id"),rs.getString("username"),rs.getString("password_hash"),rs.getString("display_name"),rs.getBoolean("enabled")) }, id).firstOrNull()
+    private fun findByUsername(username: String) = jdbc.query("SELECT id,username,password_hash,display_name,enabled,failed_login_count,locked_until FROM iview_user WHERE username=?", userMapper, username).firstOrNull()
+    private fun findById(id: Long) = jdbc.query("SELECT id,username,password_hash,display_name,enabled,failed_login_count,locked_until FROM iview_user WHERE id=?", userMapper, id).firstOrNull()
     private fun StoredUser.view() = AuthUser(id, username, displayName, jdbc.query("SELECT r.role_code FROM iview_role r JOIN iview_user_role ur ON ur.role_id=r.id WHERE ur.user_id=? ORDER BY r.role_code", { rs, _ -> rs.getString(1) }, id))
     private fun passwordHash(password: String): String { val salt = ByteArray(16).also(random::nextBytes); val derived = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(PBEKeySpec(password.toCharArray(), salt, 210_000, 256)).encoded; return "${Base64.getEncoder().encodeToString(salt)}:${Base64.getEncoder().encodeToString(derived)}" }
     private fun verify(password: String, stored: String): Boolean { val pieces = stored.split(':'); if (pieces.size != 2) return false; val derived = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(PBEKeySpec(password.toCharArray(), Base64.getDecoder().decode(pieces[0]), 210_000, 256)).encoded; return MessageDigest.isEqual(derived, Base64.getDecoder().decode(pieces[1])) }
@@ -90,5 +114,11 @@ class IdentityService(
     private fun signature(payload: String): String = Base64.getUrlEncoder().withoutPadding().encodeToString(Mac.getInstance("HmacSHA256").apply { init(SecretKeySpec(tokenSecret.toByteArray(StandardCharsets.UTF_8), "HmacSHA256")) }.doFinal(payload.toByteArray(StandardCharsets.UTF_8)))
     private fun randomToken(): String = ByteArray(48).also(random::nextBytes).let { Base64.getUrlEncoder().withoutPadding().encodeToString(it) }
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(StandardCharsets.UTF_8)).joinToString("") { "%02x".format(it) }
-    private data class StoredUser(val id: Long, val username: String, val passwordHash: String, val displayName: String, val enabled: Boolean)
+    private fun recordLogin(username: String, remoteAddress: String, successful: Boolean, reason: String) {
+        jdbc.update("INSERT INTO iview_auth_audit(username,remote_address,successful,reason) VALUES(?,?,?,?)", username.ifBlank { "<empty>" }, remoteAddress.take(64), successful, reason)
+    }
+    private val userMapper = org.springframework.jdbc.core.RowMapper { rs, _ ->
+        StoredUser(rs.getLong("id"), rs.getString("username"), rs.getString("password_hash"), rs.getString("display_name"), rs.getBoolean("enabled"), rs.getInt("failed_login_count"), rs.getTimestamp("locked_until")?.toInstant())
+    }
+    private data class StoredUser(val id: Long, val username: String, val passwordHash: String, val displayName: String, val enabled: Boolean, val failedLoginCount: Int, val lockedUntil: Instant?)
 }

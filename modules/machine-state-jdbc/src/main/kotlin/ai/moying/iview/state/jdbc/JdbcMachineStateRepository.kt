@@ -6,6 +6,8 @@ import ai.moying.iview.state.MachineStateRepository
 import ai.moying.iview.state.MachineStateRule
 import ai.moying.iview.state.MachineStateRuleCommand
 import ai.moying.iview.state.StoredMachineStateInterval
+import ai.moying.iview.state.MachineStateCorrection
+import ai.moying.iview.state.MachineStateCorrectionCommand
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.jdbc.core.RowMapper
@@ -21,6 +23,7 @@ class JdbcMachineStateRepository(private val jdbc: NamedParameterJdbcTemplate, p
     private val ruleInsert by lazy { insert("iview_machine_state_rule", "template_id", "point_id", "standard_mapping_json", "runtime_mapping_json", "default_status", "default_runtime_state", "enabled", "rule_version") }
     private val currentInsert by lazy { insert("iview_device_current_state", "device_id", "raw_status", "standard_status", "runtime_state", "source", "rule_version", "reported_at") }
     private val intervalInsert by lazy { insert("iview_machine_state_interval", "device_id", "state", "started_at", "rule_version") }
+    private val correctionInsert by lazy { insert("iview_machine_state_correction", "device_id", "state", "started_at", "ended_at", "reason", "actor") }
     override fun listRules() = jdbc.query("SELECT * FROM iview_machine_state_rule ORDER BY id", emptyMap<String, Any>(), ruleMapper)
     override fun findRule(id: Long) = one("SELECT * FROM iview_machine_state_rule WHERE id=:id", mapOf("id" to id), ruleMapper)
     override fun createRule(command: MachineStateRuleCommand): MachineStateRule {
@@ -46,6 +49,13 @@ class JdbcMachineStateRepository(private val jdbc: NamedParameterJdbcTemplate, p
     }
     override fun listIntervals(deviceId: Long, start: Instant, endExclusive: Instant) = jdbc.query(
         "SELECT * FROM iview_machine_state_interval WHERE device_id=:deviceId AND started_at < :endExclusive AND (ended_at IS NULL OR ended_at > :start) ORDER BY started_at", mapOf("deviceId" to deviceId, "start" to start, "endExclusive" to endExclusive), intervalMapper)
+    override fun listCorrections(deviceId: Long, start: Instant, endExclusive: Instant) = jdbc.query(
+        "SELECT * FROM iview_machine_state_correction WHERE device_id=:deviceId AND started_at < :endExclusive AND ended_at > :start ORDER BY started_at,id", mapOf("deviceId" to deviceId, "start" to start, "endExclusive" to endExclusive), correctionMapper)
+    override fun createCorrection(command: MachineStateCorrectionCommand): MachineStateCorrection {
+        val id = correctionInsert.executeAndReturnKey(mapOf("device_id" to command.deviceId, "state" to command.state.name, "started_at" to command.startedAt, "ended_at" to command.endedAt, "reason" to command.reason, "actor" to command.actor)).toLong()
+        return one("SELECT * FROM iview_machine_state_correction WHERE id=:id", mapOf("id" to id), correctionMapper)!!
+    }
+    override fun deleteCorrection(id: Long) = jdbc.update("DELETE FROM iview_machine_state_correction WHERE id=:id", mapOf("id" to id)) > 0
     private fun values(c: MachineStateRuleCommand, version: Int) = mapOf("template_id" to c.templateId, "point_id" to c.pointId, "standard_mapping_json" to mapper.writeValueAsString(c.standardMapping), "runtime_mapping_json" to mapper.writeValueAsString(c.runtimeMapping.mapValues { it.value.name }), "default_status" to c.defaultStatus, "default_runtime_state" to c.defaultRuntimeState.name, "enabled" to c.enabled, "rule_version" to version)
     private fun currentValues(c: CurrentMachineState) = mapOf("device_id" to c.deviceId, "raw_status" to c.rawStatus, "standard_status" to c.standardStatus, "runtime_state" to c.runtimeState.name, "source" to c.source, "rule_version" to c.ruleVersion, "reported_at" to c.reportedAt)
     private fun insert(t: String, vararg c: String) = SimpleJdbcInsert(jdbc.jdbcTemplate).withTableName(t).usingGeneratedKeyColumns("id").usingColumns(*c)
@@ -55,4 +65,5 @@ class JdbcMachineStateRepository(private val jdbc: NamedParameterJdbcTemplate, p
     private val ruleMapper = RowMapper { rs, _ -> MachineStateRule(rs.getLong("id"), rs.getLong("template_id"), rs.getLong("point_id"), stringMap(rs.getString("standard_mapping_json")), stringMap(rs.getString("runtime_mapping_json")).mapValues { MachineState.valueOf(it.value) }, rs.getString("default_status"), MachineState.valueOf(rs.getString("default_runtime_state")), rs.getBoolean("enabled"), rs.getLong("rule_version"), instant(rs,"created_at"), instant(rs,"updated_at")) }
     private val currentMapper = RowMapper { rs, _ -> CurrentMachineState(rs.getLong("device_id"), rs.getString("raw_status"), rs.getString("standard_status"), MachineState.valueOf(rs.getString("runtime_state")), rs.getString("source"), rs.getString("rule_version"), instant(rs,"reported_at"), instant(rs,"updated_at")) }
     private val intervalMapper = RowMapper { rs, _ -> StoredMachineStateInterval(rs.getLong("id"), rs.getLong("device_id"), MachineState.valueOf(rs.getString("state")), instant(rs,"started_at"), rs.getTimestamp("ended_at")?.toInstant(), rs.getString("rule_version")) }
+    private val correctionMapper = RowMapper { rs, _ -> MachineStateCorrection(rs.getLong("id"), rs.getLong("device_id"), MachineState.valueOf(rs.getString("state")), instant(rs,"started_at"), instant(rs,"ended_at"), rs.getString("reason"), rs.getString("actor"), instant(rs,"created_at")) }
 }

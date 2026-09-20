@@ -43,4 +43,12 @@ class StructuredDatasetQueryServiceTest {
         val request = DatasetStructuredQueryRequest().also { it.fields = listOf("line", "drop table") }
         assertFailsWith<DatasetValidationException> { service.execute(source, request) }
     }
+
+    @Test
+    fun `numeric equality does not match a different number`() {
+        val request = DatasetStructuredQueryRequest().also {
+            it.filters = listOf(DatasetFilterRequest().also { filter -> filter.field = "count"; filter.operator = "equals"; filter.value = "12" })
+        }
+        assertEquals(listOf(listOf("A01", 12, "running")), service.execute(source, request).rows)
+    }
 }

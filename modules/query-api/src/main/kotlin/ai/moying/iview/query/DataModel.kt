@@ -45,6 +45,13 @@ data class DataModelPublishPlan(
     val breakingChanges: Int,
     val requiresPublish: Boolean,
 )
+data class DataModelRollbackPlan(
+    val model: DataModel,
+    val publishedSchema: DataModelSchema,
+    val targetSchema: DataModelSchema,
+    val changes: List<DataModelFieldChange>,
+    val breakingChanges: Int,
+)
 
 interface DataModelRepository {
     fun list(): List<DataModel>
@@ -54,6 +61,7 @@ interface DataModelRepository {
     fun delete(id: Long): Boolean
     fun latestSchema(modelId: Long): DataModelSchema?
     fun listSchemas(modelId: Long): List<DataModelSchema>
+    fun schema(modelId: Long, version: Int): DataModelSchema?
     fun appendSchema(modelId: Long, fields: List<DataModelField>, fingerprint: String): DataModelSchema
     fun markDrifted(id: Long, latestSchemaVersion: Int): DataModel?
     fun publish(id: Long, schemaVersion: Int): DataModel?
@@ -66,6 +74,10 @@ class DataModelService(private val repository: DataModelRepository, private val 
     fun list() = repository.list()
     fun get(id: Long) = repository.find(id) ?: throw DataModelNotFoundException("数据模型不存在: $id")
     fun schemas(id: Long): List<DataModelSchema> { get(id); return repository.listSchemas(id) }
+    fun schema(id: Long, version: Int): DataModelSchema {
+        get(id)
+        return repository.schema(id, version) ?: throw DataModelValidationException("数据模型 $id 不存在字段版本 v$version")
+    }
     fun create(draft: DataModelDraft): DataModel {
         val normalized = normalize(draft); datasets.get(normalized.datasetId); return repository.create(normalized)
     }
@@ -99,6 +111,27 @@ class DataModelService(private val repository: DataModelRepository, private val 
         }
         val schema = plan.latestSchema
         return repository.publish(id, schema.version) ?: throw DataModelNotFoundException("数据模型不存在: $id")
+    }
+
+    fun rollback(id: Long, targetSchemaVersion: Int, expectedPublishedSchemaVersion: Int? = null): DataModel {
+        val model = get(id)
+        val current = model.publishedSchemaVersion ?: throw DataModelValidationException("数据模型尚未发布，不能回滚")
+        if (expectedPublishedSchemaVersion != null && current != expectedPublishedSchemaVersion) {
+            throw DataModelValidationException("已发布版本已从 v$expectedPublishedSchemaVersion 变为 v$current，请重新确认影响范围")
+        }
+        if (targetSchemaVersion == current) throw DataModelValidationException("目标版本已经是当前发布版本 v$current")
+        schema(id, targetSchemaVersion)
+        return repository.publish(id, targetSchemaVersion) ?: throw DataModelNotFoundException("数据模型不存在: $id")
+    }
+
+    fun rollbackPlan(id: Long, targetSchemaVersion: Int): DataModelRollbackPlan {
+        val model = get(id)
+        val currentVersion = model.publishedSchemaVersion ?: throw DataModelValidationException("数据模型尚未发布，不能回滚")
+        if (targetSchemaVersion == currentVersion) throw DataModelValidationException("目标版本已经是当前发布版本 v$currentVersion")
+        val current = schema(id, currentVersion)
+        val target = schema(id, targetSchemaVersion)
+        val changes = schemaChanges(current.fields, target.fields, false)
+        return DataModelRollbackPlan(model, current, target, changes, changes.count { it.breaking })
     }
 
     private fun schemaChanges(previous: List<DataModelField>, current: List<DataModelField>, firstPublish: Boolean): List<DataModelFieldChange> {

@@ -11,18 +11,24 @@ import org.springframework.web.bind.annotation.*
 import java.security.SecureRandom
 import java.time.Instant
 import java.util.Base64
+import com.fasterxml.jackson.databind.ObjectMapper
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
 
-data class ManagedUser(val id: Long, val username: String, val displayName: String, val enabled: Boolean, val roles: List<String>, val deviceIds: List<Long>, val departmentId: Long?)
+data class ManagedUser(val id: Long, val username: String, val displayName: String, val enabled: Boolean, val roles: List<String>, val deviceIds: List<Long>, val departmentId: Long?, val failedLoginCount: Int, val lockedUntil: Instant?, val lastLoginAt: Instant?)
 data class ManagedRole(val id: Long, val code: String, val name: String, val description: String, val permissions: List<String>)
 data class ManagedPermission(val id: Long, val code: String, val name: String)
 data class ManagedDepartment(val id: Long, val code: String, val name: String, val parentId: Long?, val sortOrder: Int, val enabled: Boolean)
 data class OperationAudit(val id: Long, val actor: String?, val action: String, val targetType: String, val targetId: String, val detail: String, val createdAt: Instant)
+data class AuthenticationAudit(val id: Long, val username: String, val remoteAddress: String, val successful: Boolean, val reason: String, val createdAt: Instant)
+data class SystemParameter(val key: String, val value: String, val valueType: String, val description: String, val publicVisible: Boolean, val updatedAt: Instant)
+data class NavigationMenu(val id: Long, val code: String, val parentCode: String?, val label: String, val route: String, val icon: String, val sortOrder: Int, val permissionCode: String?, val enabled: Boolean)
 class ManagedUserRequest { var username = ""; var displayName = ""; var password = ""; var enabled = true; var roleCodes: List<String> = emptyList(); var deviceIds: List<Long> = emptyList(); var departmentId: Long? = null }
 class ManagedRoleRequest { var code = ""; var name = ""; var description = ""; var permissionCodes: List<String> = emptyList() }
 class ManagedPermissionRequest { var code = ""; var name = "" }
 class ManagedDepartmentRequest { var code = ""; var name = ""; var parentId: Long? = null; var sortOrder = 0; var enabled = true }
+class SystemParameterRequest { var value = ""; var valueType = "string"; var description = ""; var publicVisible = false }
+class NavigationMenuRequest { var code = ""; var parentCode: String? = null; var label = ""; var route = ""; var icon = ""; var sortOrder = 0; var permissionCode: String? = null; var enabled = true }
 
 @Component
 class AdminGuard {
@@ -39,6 +45,7 @@ class IdentityAdministrationController(private val administration: IdentityAdmin
     @GetMapping("/users") fun users(request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(administration.users()) }
     @PostMapping("/users") @ResponseStatus(HttpStatus.CREATED) fun createUser(@RequestBody body: ManagedUserRequest, request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(administration.createUser(body, it)) }
     @PutMapping("/users/{id}") fun updateUser(@PathVariable id: Long, @RequestBody body: ManagedUserRequest, request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(administration.updateUser(id, body, it)) }
+    @PostMapping("/users/{id}/unlock") fun unlockUser(@PathVariable id: Long, request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(administration.unlockUser(id, it)) }
     @DeleteMapping("/users/{id}") fun deleteUser(@PathVariable id: Long, request: HttpServletRequest): ApiResponse<Nothing> { administration.deleteUser(id, guard.require(request)); return ApiResponse.success() }
 
     @GetMapping("/roles") fun roles(request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(administration.roles()) }
@@ -55,14 +62,35 @@ class IdentityAdministrationController(private val administration: IdentityAdmin
     @PutMapping("/departments/{id}") fun updateDepartment(@PathVariable id: Long, @RequestBody body: ManagedDepartmentRequest, request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(administration.updateDepartment(id, body, it)) }
     @DeleteMapping("/departments/{id}") fun deleteDepartment(@PathVariable id: Long, request: HttpServletRequest): ApiResponse<Nothing> { administration.deleteDepartment(id, guard.require(request)); return ApiResponse.success() }
     @GetMapping("/audit") fun audit(@RequestParam(defaultValue = "100") limit: Int, request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(administration.audit(limit)) }
+    @GetMapping("/auth-audit") fun authAudit(@RequestParam(defaultValue = "100") limit: Int, request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(administration.authAudit(limit)) }
+    @GetMapping("/parameters") fun parameters(request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(administration.parameters()) }
+    @PutMapping("/parameters/{key}") fun saveParameter(@PathVariable key: String, @RequestBody body: SystemParameterRequest, request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(administration.saveParameter(key, body, it)) }
+    @DeleteMapping("/parameters/{key}") fun deleteParameter(@PathVariable key: String, request: HttpServletRequest): ApiResponse<Nothing> { administration.deleteParameter(key, guard.require(request)); return ApiResponse.success() }
+    @GetMapping("/menus") fun menus(request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(administration.menus()) }
+    @PostMapping("/menus") @ResponseStatus(HttpStatus.CREATED) fun createMenu(@RequestBody body: NavigationMenuRequest, request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(administration.createMenu(body, it)) }
+    @PutMapping("/menus/{id}") fun updateMenu(@PathVariable id: Long, @RequestBody body: NavigationMenuRequest, request: HttpServletRequest) = guard.require(request).let { ApiResponse.success(administration.updateMenu(id, body, it)) }
+    @DeleteMapping("/menus/{id}") fun deleteMenu(@PathVariable id: Long, request: HttpServletRequest): ApiResponse<Nothing> { administration.deleteMenu(id, guard.require(request)); return ApiResponse.success() }
+}
+
+@RestController
+@RequestMapping("/api/v1")
+class PlatformConfigurationController(private val administration: IdentityAdministrationService, private val identities: IdentityService) {
+    @GetMapping("/navigation") fun navigation(request: HttpServletRequest): ApiResponse<List<NavigationMenu>> {
+        val user = request.getAttribute("iview.user") as? AuthUser ?: throw AuthenticationException("请先登录")
+        return ApiResponse.success(administration.menus().filter { menu -> menu.enabled && menu.permissionCode?.let { code ->
+            val separator = code.indexOf(':')
+            separator > 0 && identities.permitted(user, code.substring(0, separator), code.substring(separator + 1))
+        } != false })
+    }
+    @GetMapping("/system/parameters") fun publicParameters() = ApiResponse.success(administration.parameters().filter(SystemParameter::publicVisible))
 }
 
 @Service
-class IdentityAdministrationService(private val jdbc: JdbcTemplate) {
+class IdentityAdministrationService(private val jdbc: JdbcTemplate, private val objectMapper: ObjectMapper) {
     private val random = SecureRandom()
 
-    fun users(): List<ManagedUser> = jdbc.query("SELECT id,username,display_name,enabled FROM iview_user ORDER BY id") { rs, _ ->
-        val id = rs.getLong("id"); ManagedUser(id, rs.getString("username"), rs.getString("display_name"), rs.getBoolean("enabled"), userRoles(id), userDeviceIds(id), userDepartmentId(id))
+    fun users(): List<ManagedUser> = jdbc.query("SELECT id,username,display_name,enabled,failed_login_count,locked_until,last_login_at FROM iview_user ORDER BY id") { rs, _ ->
+        val id = rs.getLong("id"); ManagedUser(id, rs.getString("username"), rs.getString("display_name"), rs.getBoolean("enabled"), userRoles(id), userDeviceIds(id), userDepartmentId(id), rs.getInt("failed_login_count"), rs.getTimestamp("locked_until")?.toInstant(), rs.getTimestamp("last_login_at")?.toInstant())
     }
     fun roles(): List<ManagedRole> = jdbc.query("SELECT id,role_code,role_name,description FROM iview_role ORDER BY role_code") { rs, _ ->
         val id = rs.getLong("id"); ManagedRole(id, rs.getString("role_code"), rs.getString("role_name"), rs.getString("description"), rolePermissions(id))
@@ -70,6 +98,49 @@ class IdentityAdministrationService(private val jdbc: JdbcTemplate) {
     fun permissions(): List<ManagedPermission> = jdbc.query("SELECT id,permission_code,permission_name FROM iview_permission ORDER BY permission_code") { rs, _ -> ManagedPermission(rs.getLong("id"), rs.getString("permission_code"), rs.getString("permission_name")) }
     fun departments(): List<ManagedDepartment> = jdbc.query("SELECT id,department_code,department_name,parent_id,sort_order,enabled FROM iview_department ORDER BY sort_order,id") { rs, _ -> ManagedDepartment(rs.getLong("id"), rs.getString("department_code"), rs.getString("department_name"), rs.getObject("parent_id", Long::class.java), rs.getInt("sort_order"), rs.getBoolean("enabled")) }
     fun audit(limit: Int): List<OperationAudit> = jdbc.query("SELECT a.id,u.username,a.action,a.target_type,a.target_id,a.detail,a.created_at FROM iview_operation_audit a LEFT JOIN iview_user u ON u.id=a.actor_user_id ORDER BY a.id DESC LIMIT ?", { rs, _ -> OperationAudit(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6), rs.getTimestamp(7).toInstant()) }, limit.coerceIn(1, 500))
+    fun authAudit(limit: Int): List<AuthenticationAudit> = jdbc.query("SELECT id,username,remote_address,successful,reason,created_at FROM iview_auth_audit ORDER BY id DESC LIMIT ?", { rs, _ -> AuthenticationAudit(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getBoolean(4), rs.getString(5), rs.getTimestamp(6).toInstant()) }, limit.coerceIn(1, 500))
+    fun parameters(): List<SystemParameter> = jdbc.query("SELECT parameter_key,parameter_value,value_type,description,public_visible,updated_at FROM iview_system_parameter ORDER BY parameter_key") { rs, _ -> SystemParameter(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getBoolean(5), rs.getTimestamp(6).toInstant()) }
+    fun menus(): List<NavigationMenu> = jdbc.query("SELECT id,menu_code,parent_code,menu_label,route,icon,sort_order,permission_code,enabled FROM iview_navigation_menu ORDER BY sort_order,id") { rs, _ -> NavigationMenu(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getString(6), rs.getInt(7), rs.getString(8), rs.getBoolean(9)) }
+
+    @Transactional fun saveParameter(key: String, body: SystemParameterRequest, actor: AuthUser): SystemParameter {
+        val normalizedKey = key.trim().lowercase()
+        if (!Regex("[a-z][a-z0-9_.-]{2,127}").matches(normalizedKey)) throw IllegalArgumentException("系统参数键格式无效")
+        val type = body.valueType.lowercase()
+        if (type !in setOf("string", "number", "boolean", "json")) throw IllegalArgumentException("系统参数类型仅支持 string、number、boolean、json")
+        if (body.value.length > 2000 || body.description.length > 500) throw IllegalArgumentException("系统参数内容过长")
+        if (type == "number" && body.value.toBigDecimalOrNull() == null) throw IllegalArgumentException("number 类型参数值无效")
+        if (type == "boolean" && body.value.toBooleanStrictOrNull() == null) throw IllegalArgumentException("boolean 类型参数值只能是 true 或 false")
+        if (type == "json" && runCatching { objectMapper.readTree(body.value) }.getOrNull() == null) throw IllegalArgumentException("json 类型参数值不是有效 JSON")
+        val exists = count("SELECT COUNT(*) FROM iview_system_parameter WHERE parameter_key=?", normalizedKey) > 0
+        if (exists) jdbc.update("UPDATE iview_system_parameter SET parameter_value=?,value_type=?,description=?,public_visible=?,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE parameter_key=?", body.value, type, body.description.trim(), body.publicVisible, actor.id, normalizedKey)
+        else jdbc.update("INSERT INTO iview_system_parameter(parameter_key,parameter_value,value_type,description,public_visible,updated_by) VALUES(?,?,?,?,?,?)", normalizedKey, body.value, type, body.description.trim(), body.publicVisible, actor.id)
+        record(actor, if (exists) "UPDATE" else "CREATE", "SYSTEM_PARAMETER", normalizedKey, "type=$type, public=${body.publicVisible}")
+        return parameters().first { it.key == normalizedKey }
+    }
+    @Transactional fun deleteParameter(key: String, actor: AuthUser) {
+        if (jdbc.update("DELETE FROM iview_system_parameter WHERE parameter_key=?", key) == 0) throw IllegalArgumentException("系统参数不存在")
+        record(actor, "DELETE", "SYSTEM_PARAMETER", key, key)
+    }
+    @Transactional fun createMenu(body: NavigationMenuRequest, actor: AuthUser): NavigationMenu {
+        validateMenu(body, null)
+        jdbc.update("INSERT INTO iview_navigation_menu(menu_code,parent_code,menu_label,route,icon,sort_order,permission_code,enabled) VALUES(?,?,?,?,?,?,?,?)", body.code, body.parentCode, body.label.trim(), body.route.trim(), body.icon.trim(), body.sortOrder, body.permissionCode?.takeIf(String::isNotBlank), body.enabled)
+        val menu = menus().first { it.code == body.code }
+        record(actor, "CREATE", "NAVIGATION_MENU", menu.id, menu.code)
+        return menu
+    }
+    @Transactional fun updateMenu(id: Long, body: NavigationMenuRequest, actor: AuthUser): NavigationMenu {
+        val current = menus().firstOrNull { it.id == id } ?: throw IllegalArgumentException("菜单不存在")
+        validateMenu(body, id)
+        jdbc.update("UPDATE iview_navigation_menu SET menu_code=?,parent_code=?,menu_label=?,route=?,icon=?,sort_order=?,permission_code=?,enabled=? WHERE id=?", body.code, body.parentCode, body.label.trim(), body.route.trim(), body.icon.trim(), body.sortOrder, body.permissionCode?.takeIf(String::isNotBlank), body.enabled, id)
+        record(actor, "UPDATE", "NAVIGATION_MENU", id, current.code)
+        return menus().first { it.id == id }
+    }
+    @Transactional fun deleteMenu(id: Long, actor: AuthUser) {
+        val current = menus().firstOrNull { it.id == id } ?: throw IllegalArgumentException("菜单不存在")
+        if (menus().any { it.parentCode == current.code }) throw IllegalArgumentException("请先处理子菜单")
+        jdbc.update("DELETE FROM iview_navigation_menu WHERE id=?", id)
+        record(actor, "DELETE", "NAVIGATION_MENU", id, current.code)
+    }
 
     @Transactional fun createUser(body: ManagedUserRequest, actor: AuthUser): ManagedUser {
         val username = validateCode(body.username, "用户名").lowercase(); validatePassword(body.password)
@@ -94,6 +165,12 @@ class IdentityAdministrationService(private val jdbc: JdbcTemplate) {
         val current = users().firstOrNull { it.id == id } ?: throw IllegalArgumentException("用户不存在")
         if (id == actor.id || current.username == "admin") throw IllegalArgumentException("不能删除当前用户或引导管理员")
         record(actor, "DELETE", "USER", id, current.username); jdbc.update("DELETE FROM iview_user WHERE id=?", id)
+    }
+    @Transactional fun unlockUser(id: Long, actor: AuthUser): ManagedUser {
+        val current = users().firstOrNull { it.id == id } ?: throw IllegalArgumentException("用户不存在")
+        jdbc.update("UPDATE iview_user SET failed_login_count=0,locked_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?", id)
+        record(actor, "UNLOCK", "USER", id, current.username)
+        return users().first { it.id == id }
     }
 
     @Transactional fun createRole(body: ManagedRoleRequest, actor: AuthUser): ManagedRole {
@@ -166,6 +243,17 @@ class IdentityAdministrationService(private val jdbc: JdbcTemplate) {
     private fun validatePermissionCode(code: String) {
         if (code == "*") throw IllegalArgumentException("全部权限为系统保留权限")
         if (!Regex("^(GET|POST|PUT|PATCH|DELETE):/api/v1/[A-Za-z0-9_.*{}/-]+$").matches(code)) throw IllegalArgumentException("权限编码格式应为 METHOD:/api/v1/path，可使用 * 或 ** 通配路径")
+    }
+    private fun validateMenu(body: NavigationMenuRequest, currentId: Long?) {
+        body.code = validateCode(body.code, "菜单编码").lowercase()
+        body.label = required(body.label, "菜单名称", 100)
+        body.route = body.route.trim()
+        if (!Regex("[a-z][a-z0-9/-]{0,199}").matches(body.route)) throw IllegalArgumentException("菜单路由格式无效")
+        if (body.icon.length > 64 || body.sortOrder !in -100000..100000) throw IllegalArgumentException("菜单图标或排序值无效")
+        body.permissionCode?.takeIf(String::isNotBlank)?.let(::validatePermissionCode)
+        if (menus().any { it.code == body.code && it.id != currentId }) throw IllegalArgumentException("菜单编码已存在")
+        if (body.parentCode == body.code) throw IllegalArgumentException("菜单不能以自身为上级")
+        body.parentCode?.let { parent -> if (menus().none { it.code == parent && it.id != currentId }) throw IllegalArgumentException("上级菜单不存在") }
     }
     private fun userRoles(id: Long) = jdbc.query("SELECT r.role_code FROM iview_role r JOIN iview_user_role ur ON ur.role_id=r.id WHERE ur.user_id=? ORDER BY r.role_code", { rs, _ -> rs.getString(1) }, id)
     private fun userDeviceIds(id: Long) = jdbc.query("SELECT device_id FROM iview_user_device_scope WHERE user_id=? ORDER BY device_id", { rs, _ -> rs.getLong(1) }, id)

@@ -97,6 +97,30 @@ class DataSourceExecutionService(
     fun queryDataset(dataset: Dataset, maxRows: Int, variables: Map<String, String> = emptyMap()): SqlResult =
         execute(sources.credential(dataset.sourceId), dataset.sql, maxRows, variables)
 
+    fun queryStructuredDataset(
+        dataset: Dataset,
+        request: DatasetStructuredQueryRequest,
+        fallback: StructuredDatasetQueryService,
+    ): StructuredDatasetQueryResult {
+        val credential = sources.credential(dataset.sourceId)
+        if (credential.type != DataSourceType.POSTGRESQL) {
+            return fallback.execute(queryDataset(dataset, StructuredDatasetQueryService.SOURCE_ROW_LIMIT, request.variables), request)
+        }
+        return postgres(credential) { connection ->
+            connection.isReadOnly = true
+            val bound = DatasetSql.bindVariables(SafeSql.selectOnly(dataset.sql), request.variables)
+            val sourceSchema = postgresSchema(connection, bound.sql, bound.values)
+            val query = PostgresStructuredQueryBuilder().build(bound.sql, bound.values, sourceSchema, request)
+            val result = executeObjects(connection, query.sql, query.values, query.baseValueCount)
+            val total = connection.prepareStatement(query.countSql).use { statement ->
+                bindObjects(statement, query.values, query.baseValueCount)
+                statement.queryTimeout = 30
+                statement.executeQuery().use { rows -> rows.next(); rows.getLong(1).coerceAtMost(Int.MAX_VALUE.toLong()).toInt() }
+            }
+            StructuredDatasetQueryResult(result.columns, result.rows, total, request.offset, request.limit, false)
+        }
+    }
+
     fun schema(dataset: Dataset, variables: Map<String, String>): List<SchemaColumn> {
         val credential = sources.credential(dataset.sourceId)
         return if (credential.type == DataSourceType.POSTGRESQL) postgres(credential) { connection ->
@@ -106,6 +130,27 @@ class DataSourceExecutionService(
                 statement.executeQuery().use { rs -> val meta = rs.metaData; (1..meta.columnCount).map { SchemaColumn(meta.getColumnLabel(it), meta.getColumnTypeName(it), meta.isNullable(it) != 0) } }
             }
         } else queryDataset(dataset, 1, variables).columns
+    }
+
+    private fun postgresSchema(connection: java.sql.Connection, sql: String, values: List<String>): List<SchemaColumn> =
+        connection.prepareStatement("SELECT * FROM ($sql) iview_dataset_schema WHERE 1=0").use { statement ->
+            bind(statement, values)
+            statement.queryTimeout = 30
+            statement.executeQuery().use { rs ->
+                val meta = rs.metaData
+                (1..meta.columnCount).map { SchemaColumn(meta.getColumnLabel(it), meta.getColumnTypeName(it), meta.isNullable(it) != 0) }
+            }
+        }
+
+    private fun executeObjects(connection: java.sql.Connection, sql: String, values: List<Any?>, unspecifiedPrefix: Int): SqlResult = connection.prepareStatement(sql).use { statement ->
+        bindObjects(statement, values, unspecifiedPrefix)
+        statement.queryTimeout = 30
+        statement.executeQuery().use { rs ->
+            val meta = rs.metaData
+            val columns = (1..meta.columnCount).map { SchemaColumn(meta.getColumnLabel(it), meta.getColumnTypeName(it), meta.isNullable(it) != 0) }
+            val rows = generateSequence { if (rs.next()) (1..meta.columnCount).map(rs::getObject) else null }.toList()
+            SqlResult(columns, rows)
+        }
     }
 
     fun explain(dataset: Dataset, variables: Map<String, String>): List<String> {
@@ -294,7 +339,10 @@ class DataSourceExecutionService(
         else -> mapper.writeValueAsString(node)
     }
     private fun inferType(value: Any?) = when (value) { is Boolean -> "BOOLEAN"; is Byte, is Short, is Int, is Long -> "BIGINT"; is Float, is Double -> "DOUBLE"; null -> "UNKNOWN"; else -> "VARCHAR" }
-    private fun bind(statement: java.sql.PreparedStatement, values: List<String>) = values.forEachIndexed { index, value -> statement.setString(index + 1, value) }
+    private fun bind(statement: java.sql.PreparedStatement, values: List<String>) = values.forEachIndexed { index, value -> statement.setObject(index + 1, value, java.sql.Types.OTHER) }
+    private fun bindObjects(statement: java.sql.PreparedStatement, values: List<Any?>, unspecifiedPrefix: Int = 0) = values.forEachIndexed { index, value ->
+        if (index < unspecifiedPrefix) statement.setObject(index + 1, value, java.sql.Types.OTHER) else statement.setObject(index + 1, value)
+    }
     private fun <T> withCredential(id: Long, block: (DataSourceCredential) -> T) = block(sources.credential(id))
     private fun <T> postgres(credential: DataSourceCredential, block: (java.sql.Connection) -> T): T = DriverManager.getConnection(credential.endpoint, credential.username, credential.password).use(block)
     private fun <T> mongo(credential: DataSourceCredential, config: JsonNode, block: (MongoClient, ConnectionString) -> T): T {

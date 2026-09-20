@@ -39,6 +39,23 @@ class DataModelServiceTest {
         assertEquals(DataModelStatus.PUBLISHED, service.publish(model.id, 2).status)
     }
 
+    @Test fun `published schema can be rolled back with optimistic version check`() {
+        val sources = DataSourceService(SourceMemory(), PlainCipher())
+        sources.create(DataSourceDraft("s", DataSourceType.POSTGRESQL, "jdbc:postgresql://db/x", "u", "p"))
+        val service = DataModelService(ModelMemory(), DatasetService(DatasetMemory(), sources))
+        val model = service.create(DataModelDraft(1, "订单模型"))
+        service.sync(model.id, listOf(DataModelField("id", "BIGINT", false)))
+        service.publish(model.id, 1)
+        service.sync(model.id, listOf(DataModelField("id", "BIGINT", false), DataModelField("state", "VARCHAR", true)))
+        service.publish(model.id, 2)
+
+        val rollbackPlan = service.rollbackPlan(model.id, 1)
+        assertEquals(1, rollbackPlan.breakingChanges)
+        assertEquals(DataModelFieldChangeKind.REMOVED, rollbackPlan.changes.single().kind)
+        assertEquals(1, service.rollback(model.id, 1, 2).publishedSchemaVersion)
+        assertFailsWith<DataModelValidationException> { service.rollback(model.id, 2, 2) }
+    }
+
     private class PlainCipher : DataSourceSecretCipher { override fun encrypt(plainText: String) = plainText; override fun decrypt(cipherText: String) = cipherText }
     private class SourceMemory : DataSourceRepository {
         private var source: StoredDataSource? = null
@@ -57,6 +74,7 @@ class DataModelServiceTest {
         override fun create(draft: DataModelDraft) = DataModel(1, draft.datasetId, draft.name, draft.description, DataModelStatus.DRAFT, 0, null, Instant.EPOCH, Instant.EPOCH).also { item = it }
         override fun update(id: Long, draft: DataModelDraft) = item?.copy(datasetId = draft.datasetId, name = draft.name, description = draft.description)?.also { item = it }
         override fun delete(id: Long) = false; override fun latestSchema(modelId: Long) = schemas.lastOrNull(); override fun listSchemas(modelId: Long) = schemas.toList()
+        override fun schema(modelId: Long, version: Int) = schemas.firstOrNull { it.modelId == modelId && it.version == version }
         override fun appendSchema(modelId: Long, fields: List<DataModelField>, fingerprint: String) = DataModelSchema(schemas.size + 1L, modelId, schemas.size + 1, fields, fingerprint, Instant.EPOCH).also { schemas += it; item = item!!.copy(latestSchemaVersion = it.version) }
         override fun markDrifted(id: Long, latestSchemaVersion: Int) = item?.copy(status = DataModelStatus.DRIFTED, latestSchemaVersion = latestSchemaVersion)?.also { item = it }
         override fun publish(id: Long, schemaVersion: Int) = item?.copy(status = DataModelStatus.PUBLISHED, publishedSchemaVersion = schemaVersion)?.also { item = it }
