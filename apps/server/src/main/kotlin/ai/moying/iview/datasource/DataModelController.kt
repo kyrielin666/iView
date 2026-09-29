@@ -117,7 +117,7 @@ class DataModelController(
 
     private fun dependencies(modelId: Long, changedFields: Set<String>): List<DataModelDashboardImpact> = dashboards.list().mapNotNull { dashboard ->
         val document = runCatching { objectMapper.readValue(dashboard.contentJson, DashboardDocument::class.java) }.getOrNull()
-        val components = document?.components.orEmpty().filter { component -> (component.modelId ?: dashboard.modelId) == modelId }
+        val components = document?.components.orEmpty().filter { component -> component.realtime == null && (component.modelId ?: dashboard.modelId) == modelId }
         if (dashboard.modelId != modelId && components.isEmpty()) return@mapNotNull null
         val affected = components.flatMap { it.fields }.filter { it in changedFields }.distinct()
         DataModelDashboardImpact(dashboard.id, dashboard.name, dashboard.status.name.lowercase(), components.map { it.id }, affected)

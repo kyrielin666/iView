@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.*
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.ZoneOffset
@@ -52,7 +53,9 @@ class BackupService(
         require(retentionCount in 1..100) { "备份保留数量必须在 1 到 100 之间" }; val dir = ensureDirectory()
         val suffix = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS").withZone(ZoneOffset.UTC).format(Instant.now())
         val target = safeName("iview-$suffix.${if (isPostgres()) "dump" else "sql"}")
+        if (Files.exists(target)) throw BackupException("备份文件名冲突，请稍后重试")
         if (isPostgres()) createPostgres(target) else { requireH2(); jdbc.execute("SCRIPT TO '${target.toString().replace("'", "''")}'") }
+        Files.writeString(checksumPath(target), "${digest(target)}\n", StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)
         val result = metadata(target); trimRetention(dir); return result
     }
     fun validate(name: String): BackupFile {
@@ -80,9 +83,14 @@ class BackupService(
     private fun ensureDirectory(): Path = directory.also { Files.createDirectories(it) }
     private fun safeName(name: String): Path { if (!namePattern.matches(name)) throw BackupException("备份文件名不合法"); val result = directory.resolve(name).normalize(); if (result.parent != directory) throw BackupException("备份文件路径不合法"); return result }
     private fun existing(name: String): Path = safeName(name).also { if (!Files.isRegularFile(it)) throw BackupException("备份文件不存在") }
-    private fun metadata(path: Path): BackupFile { val size = Files.size(path); return BackupFile(path.fileName.toString(), size, digest(path), Files.getLastModifiedTime(path).toInstant(), size > 0, if (path.fileName.toString().endsWith(".dump")) "POSTGRESQL" else "H2") }
+    private fun checksumPath(path: Path): Path = path.resolveSibling("${path.fileName}.sha256")
+    private fun metadata(path: Path): BackupFile {
+        val size = Files.size(path); val checksum = digest(path); val manifest = checksumPath(path)
+        val expected = if (Files.isRegularFile(manifest)) Files.readString(manifest).trim() else ""
+        return BackupFile(path.fileName.toString(), size, checksum, Files.getLastModifiedTime(path).toInstant(), size > 0 && expected.matches(Regex("[0-9a-f]{64}")) && checksum == expected, if (path.fileName.toString().endsWith(".dump")) "POSTGRESQL" else "H2")
+    }
     private fun digest(path: Path): String = Files.newInputStream(path).use { input -> MessageDigest.getInstance("SHA-256").let { digest -> ByteArray(8192).let { buffer -> generateSequence { input.read(buffer).takeIf { it > 0 } }.forEach { digest.update(buffer, 0, it) }; digest.digest().joinToString("") { byte -> "%02x".format(byte) } } } }
-    private fun trimRetention(dir: Path) { val stale = Files.list(dir).use { it.filter { Files.isRegularFile(it) && namePattern.matches(it.fileName.toString()) }.sorted().toList().dropLast(retentionCount) }; stale.forEach(Files::deleteIfExists) }
+    private fun trimRetention(dir: Path) { val stale = Files.list(dir).use { it.filter { Files.isRegularFile(it) && namePattern.matches(it.fileName.toString()) }.sorted().toList().dropLast(retentionCount) }; stale.forEach { Files.deleteIfExists(it); Files.deleteIfExists(checksumPath(it)) } }
     private data class PostgresConnection(val host: String, val port: Int, val database: String, val username: String, val password: String)
     private fun postgresConnection(): PostgresConnection {
         if (!isPostgres()) throw BackupException("当前数据库不是 PostgreSQL")

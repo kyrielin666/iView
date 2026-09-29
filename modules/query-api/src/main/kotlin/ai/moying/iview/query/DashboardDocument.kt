@@ -10,10 +10,14 @@ data class DashboardInteraction(
     val event: String, val action: String, val targetDashboardId: Long? = null, val parameters: Map<String, String> = emptyMap(),
 )
 data class DashboardRepeatConfig(val maxItems: Int = 10, val direction: String = "vertical", val childIds: List<String> = emptyList())
+/** Explicit, access-controlled device telemetry subscription for a dashboard component.
+ * It is intentionally a document binding, never a protocol-driver configuration. */
+data class DashboardRealtimeBinding(val deviceId: Long, val pointIds: List<Long> = emptyList())
 data class DashboardComponent(
     val id: String, val type: String, val x: Int, val y: Int, val width: Int, val height: Int,
     val modelId: Long? = null, val fields: List<String> = emptyList(), val props: Map<String, Any?> = emptyMap(),
     val conditionalStyles: List<DashboardConditionalStyle> = emptyList(), val interactions: List<DashboardInteraction> = emptyList(), val repeat: DashboardRepeatConfig? = null,
+    val realtime: DashboardRealtimeBinding? = null,
 )
 data class DashboardDocument(
     val version: Int = 1, val layoutMode: DashboardLayoutMode = DashboardLayoutMode.GRID, val canvas: DashboardCanvas = DashboardCanvas(),
@@ -39,9 +43,15 @@ class DashboardDocumentValidator(private val modelById: (Long) -> DataModel) {
         document.components.forEach { component ->
             if (component.type !in supported) throw DashboardValidationException("不支持的组件类型: ${component.type}")
             if (component.x < 0 || component.y < 0 || component.width !in 1..7680 || component.height !in 1..4320) throw DashboardValidationException("组件布局参数无效: ${component.id}")
-            val modelId = component.modelId ?: defaultModelId
-            if (component.fields.isNotEmpty() && modelId == null) throw DashboardValidationException("组件 ${component.id} 绑定字段时必须指定数据模型")
+            // A telemetry-bound component does not consume the dashboard's default model.
+            val modelId = component.modelId ?: if (component.realtime == null) defaultModelId else null
+            if (component.fields.isNotEmpty() && modelId == null && component.realtime == null) throw DashboardValidationException("组件 ${component.id} 绑定字段时必须指定数据模型或设备遥测")
             modelId?.let { id -> if (modelById(id).status != DataModelStatus.PUBLISHED) throw DashboardValidationException("组件 ${component.id} 只能绑定已发布数据模型: $id") }
+            component.realtime?.let { binding ->
+                if (binding.deviceId <= 0 || binding.pointIds.size > 100 || binding.pointIds.any { it <= 0 } || binding.pointIds.distinct().size != binding.pointIds.size) {
+                    throw DashboardValidationException("组件 ${component.id} 的设备遥测绑定无效")
+                }
+            }
             if (component.repeat != null && component.type != "container") throw DashboardValidationException("仅容器组件支持批量重复")
             component.repeat?.let { repeat ->
                 if (repeat.maxItems !in 1..50 || repeat.direction !in setOf("vertical", "horizontal") || repeat.childIds.isEmpty() || repeat.childIds.size > 20) throw DashboardValidationException("组件 ${component.id} 的重复容器配置无效")

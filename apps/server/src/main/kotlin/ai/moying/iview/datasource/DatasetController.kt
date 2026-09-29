@@ -41,7 +41,7 @@ data class DatasetLineageEdge(val source: String, val target: String, val confid
 data class DatasetLineageSummary(val outputFields: Int, val sourceFields: Int, val sourceTables: Int, val derivedFields: Int)
 data class DatasetLineage(
     val datasetId: Long, val fields: List<DatasetLineageField>, val nodes: List<DatasetLineageNode>, val edges: List<DatasetLineageEdge>,
-    val summary: DatasetLineageSummary, val note: String,
+    val relations: List<SqlLineageRelation>, val summary: DatasetLineageSummary, val note: String,
 )
 
 @RestController
@@ -82,6 +82,7 @@ class DatasetController(
         val fields = execution.lineage(dataset, request?.variables ?: emptyMap()).map { field ->
             DatasetLineageField(field.outputField, field.sourceCatalog, field.sourceSchema, field.sourceTable, field.sourceField, field.confidence)
         }
+        val relations = execution.lineageRelations(dataset)
         val outputNodes = fields.map { DatasetLineageNode("output:${it.outputField}", "output", it.outputField) }
         val sourceNodes = fields.mapNotNull { field -> field.sourceField?.let { source ->
             val path = listOfNotNull(field.sourceCatalog, field.sourceSchema, field.sourceTable, source).joinToString(".")
@@ -91,9 +92,9 @@ class DatasetController(
             val path = listOfNotNull(field.sourceCatalog, field.sourceSchema, field.sourceTable, source).joinToString(".")
             DatasetLineageEdge("source:$path", "output:${field.outputField}", field.confidence)
         } }
-        val tables = fields.mapNotNull { field -> field.sourceTable?.let { listOfNotNull(field.sourceCatalog, field.sourceSchema, it).joinToString(".") } }.toSet()
+        val tables = fields.mapNotNull { field -> field.sourceTable?.let { listOfNotNull(field.sourceCatalog, field.sourceSchema, it).joinToString(".") } }.toSet() + relations.filter { it.kind == "BASE_TABLE" }.map { it.name }
         val summary = DatasetLineageSummary(fields.size, sourceNodes.size, tables.size, fields.count { it.sourceField == null })
-        return ApiResponse.success(DatasetLineage(dataset.id, fields, sourceNodes + outputNodes, edges, summary, "PostgreSQL 优先使用 JDBC 字段元数据；非关系型数据源按实际响应字段建立来源关系，复杂嵌套字段保留为 JSON。"))
+        return ApiResponse.success(DatasetLineage(dataset.id, fields, sourceNodes + outputNodes, edges, relations, summary, "PostgreSQL 优先使用 JDBC 字段元数据；FROM/JOIN 与 CTE 关系仅作启发式辅助审查，表达式字段不伪造成精确字段级血缘。"))
     }
     @PostMapping("/{id}/explain") fun explain(@PathVariable id: Long, @RequestBody(required = false) request: DatasetVariablesRequest?): ApiResponse<List<String>> {
         val dataset = datasets.get(id)

@@ -202,6 +202,9 @@ class DataSourceExecutionService(
         }
     }
 
+    fun lineageRelations(dataset: Dataset): List<SqlLineageRelation> =
+        if (sources.credential(dataset.sourceId).type == DataSourceType.POSTGRESQL) SqlLineageAnalyzer.relations(dataset.sql) else emptyList()
+
     private fun mongoQuery(credential: DataSourceCredential, config: JsonNode, maxRows: Int): SqlResult = mongo(credential, config) { client, connection ->
         val database = text(config, "database") ?: connection.database ?: throw DatasetValidationException("MongoDB 查询定义缺少 database")
         val collection = text(config, "collection") ?: throw DatasetValidationException("MongoDB 查询定义缺少 collection")

@@ -11,6 +11,9 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import java.nio.file.Files
+import java.nio.file.Paths
+import java.nio.file.StandardOpenOption
 
 @SpringBootTest(properties = ["iview.backup.directory=./build/test-backups", "iview.auth.enforced=true"])
 @AutoConfigureMockMvc
@@ -26,5 +29,7 @@ class BackupApiTest {
         val name = objectMapper.readTree(body).path("data").path("name").asText()
         mockMvc.perform(post("/api/v1/backups/$name/validate").header("Authorization", "Bearer $access")).andExpect(status().isOk).andExpect(jsonPath("$.data.name").value(name)).andExpect(jsonPath("$.data.sha256").isNotEmpty)
         mockMvc.perform(get("/api/v1/backups").header("Authorization", "Bearer $access")).andExpect(status().isOk).andExpect(jsonPath("$.data[0].name").value(name))
+        Files.writeString(Paths.get("./build/test-backups", name), "\n-- truncated or modified backup\n", StandardOpenOption.APPEND)
+        mockMvc.perform(post("/api/v1/backups/$name/validate").header("Authorization", "Bearer $access")).andExpect(status().isConflict)
     }
 }

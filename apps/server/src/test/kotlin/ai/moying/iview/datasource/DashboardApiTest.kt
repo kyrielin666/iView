@@ -83,4 +83,14 @@ class DashboardApiTest {
             .andExpect(status().isCreated).andExpect(jsonPath("$.code").value("200"))
             .andExpect(jsonPath("$.data.name").value("导入副本"))
     }
+
+    @Test fun `dashboard document retains explicit device telemetry binding`() {
+        val created = mockMvc.perform(post("/api/v1/dashboards").contentType(MediaType.APPLICATION_JSON).content("""{"name":"实时设备看板"}"""))
+            .andExpect(status().isCreated).andReturn().response.contentAsString
+        val id = objectMapper.readTree(created).path("data").path("id").asLong()
+        val document = """{"components":[{"id":"pressure","type":"gauge","x":0,"y":0,"width":300,"height":160,"fields":["PRESSURE"],"realtime":{"device_id":9,"point_ids":[3]}}]}"""
+        mockMvc.perform(put("/api/v1/dashboards/$id/document").contentType(MediaType.APPLICATION_JSON).content(document))
+            .andExpect(status().isOk).andExpect(jsonPath("$.data.components[0].realtime.device_id").value(9))
+            .andExpect(jsonPath("$.data.components[0].realtime.point_ids[0]").value(3))
+    }
 }

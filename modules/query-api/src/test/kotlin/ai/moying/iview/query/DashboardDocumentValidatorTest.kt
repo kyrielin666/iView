@@ -89,4 +89,21 @@ class DashboardDocumentValidatorTest {
         assertFailsWith<DashboardValidationException> { validator.validate(DashboardDocument(refreshIntervalMs = 500)) }
         assertFailsWith<DashboardValidationException> { validator.validate(DashboardDocument(refreshIntervalMs = 3_600_001)) }
     }
+
+    @Test fun `component can explicitly bind validated device telemetry`() {
+        val validator = DashboardDocumentValidator { DataModel(it, 1, "m", "", DataModelStatus.PUBLISHED, 1, 1, Instant.EPOCH, Instant.EPOCH) }
+        val component = DashboardComponent("pressure", "gauge", 0, 0, 100, 80, fields = listOf("PRESSURE"), realtime = DashboardRealtimeBinding(9, listOf(3)))
+        assertEquals(component, validator.validate(DashboardDocument(components = listOf(component))).components.single())
+        assertFailsWith<DashboardValidationException> { validator.validate(DashboardDocument(components = listOf(component.copy(realtime = DashboardRealtimeBinding(0))))) }
+        assertFailsWith<DashboardValidationException> { validator.validate(DashboardDocument(components = listOf(component.copy(realtime = DashboardRealtimeBinding(9, listOf(3, 3)))))) }
+    }
+
+    @Test fun `telemetry binding bypasses an unpublished dashboard default model`() {
+        val validator = DashboardDocumentValidator { DataModel(it, 1, "draft", "", DataModelStatus.DRAFT, 1, null, Instant.EPOCH, Instant.EPOCH) }
+        val telemetry = DashboardComponent("pressure", "gauge", 0, 0, 100, 80, fields = listOf("PRESSURE"), realtime = DashboardRealtimeBinding(9))
+        assertEquals(telemetry, validator.validate(DashboardDocument(components = listOf(telemetry)), defaultModelId = 1).components.single())
+        assertFailsWith<DashboardValidationException> {
+            validator.validate(DashboardDocument(components = listOf(telemetry.copy(realtime = null))), defaultModelId = 1)
+        }
+    }
 }
