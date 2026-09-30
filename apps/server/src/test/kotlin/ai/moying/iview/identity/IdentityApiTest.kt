@@ -16,6 +16,12 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import org.hamcrest.Matchers.hasItems
+import ai.moying.iview.device.DeviceRealtimeHub
+import ai.moying.iview.device.DeviceScopeGuard
+import org.springframework.mock.web.MockHttpServletRequest
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -25,6 +31,9 @@ class IdentityApiTest {
     @Autowired private lateinit var mockMvc: MockMvc
     @Autowired private lateinit var objectMapper: ObjectMapper
     @Autowired private lateinit var jdbc: JdbcTemplate
+    @Autowired private lateinit var identities: IdentityService
+    @Autowired private lateinit var deviceScope: DeviceScopeGuard
+    @Autowired private lateinit var realtimeHub: DeviceRealtimeHub
 
     @Test fun `bootstrap administrator can login refresh logout and read current user`() {
         val login = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content("""{"username":"admin","password":"ChangeMe123!"}"""))
@@ -96,6 +105,14 @@ class IdentityApiTest {
         val userId = objectMapper.readTree(user).path("data").path("id").asLong()
         val viewerLogin = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content("""{"username":"viewer","password":"ViewerPass123!"}""")).andExpect(status().isOk).andReturn().response.contentAsString
         val viewerAccess = objectMapper.readTree(viewerLogin).path("data").path("access_token").asText()
+        val subscriptionRequest = MockHttpServletRequest().apply {
+            addHeader("Authorization", "Bearer $viewerAccess")
+            setAttribute("iview.user", identities.current("Bearer $viewerAccess"))
+        }
+        val stillAuthorized = deviceScope.subscriptionAuthorization(subscriptionRequest, scopedId)
+        assertTrue(stillAuthorized())
+        realtimeHub.subscribe(scopedId, stillAuthorized)
+        assertEquals(1, realtimeHub.subscriberCount(scopedId))
         mockMvc.perform(get("/api/v1/auth/me").header("Authorization", "Bearer $viewerAccess")).andExpect(status().isOk).andExpect(jsonPath("$.data.username").value("viewer"))
         mockMvc.perform(get("/api/v1/navigation").header("Authorization", "Bearer $viewerAccess")).andExpect(status().isOk)
             .andExpect(jsonPath("$.data[*].route", hasItems("devices", "alarms")))
@@ -112,6 +129,9 @@ class IdentityApiTest {
             .andExpect(jsonPath("$.data.total").value(1)).andExpect(jsonPath("$.data.enabled").value(1))
         mockMvc.perform(put("/api/v1/admin/users/$userId").header("Authorization", authorization).contentType(MediaType.APPLICATION_JSON)
             .content("""{"display_name":"无设备权限","enabled":true,"role_codes":["VIEWER"],"device_ids":[]}""")).andExpect(status().isOk)
+        assertFalse(stillAuthorized())
+        realtimeHub.revokeUnauthorized()
+        assertEquals(0, realtimeHub.subscriberCount(scopedId))
         mockMvc.perform(get("/api/v1/devices/statistics").header("Authorization", "Bearer $viewerAccess")).andExpect(status().isOk)
             .andExpect(jsonPath("$.data.total").value(0)).andExpect(jsonPath("$.data.enabled").value(0))
         mockMvc.perform(get("/api/v1/admin/users").header("Authorization", "Bearer $viewerAccess")).andExpect(status().isForbidden)

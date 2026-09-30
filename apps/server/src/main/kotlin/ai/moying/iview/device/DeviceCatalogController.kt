@@ -350,7 +350,7 @@ class DeviceProtocolController(
     @GetMapping("/{id}/subscription", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
     fun subscription(@PathVariable id: Long, request: HttpServletRequest): SseEmitter {
         scope.require(request, id)
-        return realtimeHub.subscribe(id)
+        return realtimeHub.subscribe(id, scope.subscriptionAuthorization(request, id))
     }
 
     @GetMapping("/{id}/history")

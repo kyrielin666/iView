@@ -63,8 +63,11 @@ request value may be an object keyed by target key/name or an array in target or
 | POST | `/api/v1/devices/{id}/collect` | Collect every enabled template point |
 | POST | `/api/v1/devices/{id}/collect/{pointId}` | Collect one point |
 | GET | `/api/v1/devices/{id}/realtime` | Get each template point's latest sample |
+| GET | `/api/v1/devices/{id}/subscription` | Subscribe to authorized per-device telemetry SSE |
 | GET | `/api/v1/devices/{id}/history` | Read raw samples; optional `from`, `to`, `limit` |
 | GET | `/api/v1/devices/statistics` | Device, enabled and recently-online counts |
 | GET | `/api/v1/collector/sessions` | Active JVM protocol-session status |
 
 连接测试、诊断、手动采集、实时值、原始历史和控制写入已覆盖 Modbus TCP/RTU、三菱 MC 3E、Siemens S7 与 OPC UA。驱动内部重连仍失败，或驱动将错误映射为 `TIMEOUT`/`OFFLINE` 点位质量时，采集引擎会关闭旧会话、短暂退避后重新建连并再采集一次；API 的 `attempts` 与 `recovered` 字段用于区分直接成功、重连恢复和最终失败。投产前仍需按现场 PLC、串口转换器和网络条件完成硬件验收及持续压力测试。
+
+设备遥测 SSE 在连接时、每次推送前及空闲期间复核令牌、当前角色权限和设备范围。空闲复核默认间隔 10 秒，可通过 `iview.device.sse.authorization-check-ms` 调整；授权失效时服务端关闭连接。前端会清除断流后的当前遥测值并尝试重连，不能把断流前的读数视作实时值。
