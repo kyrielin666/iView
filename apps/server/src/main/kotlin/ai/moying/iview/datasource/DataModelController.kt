@@ -11,6 +11,7 @@ import ai.moying.iview.query.DataModelPublishPlan
 import ai.moying.iview.query.DataModelRollbackPlan
 import ai.moying.iview.query.DatasetService
 import ai.moying.iview.query.DataModelStatus
+import ai.moying.iview.query.DataModelValidationException
 import ai.moying.iview.query.DashboardDocument
 import ai.moying.iview.query.DashboardService
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -37,6 +38,7 @@ data class DataModelDashboardImpact(
     val dashboardStatus: String,
     val componentIds: List<String>,
     val affectedFields: List<String>,
+    val sources: List<String>,
 )
 
 @RestController
@@ -52,7 +54,12 @@ class DataModelController(
     @GetMapping("/{id}") fun get(@PathVariable id: Long) = ApiResponse.success(view(models.get(id)))
     @PostMapping @ResponseStatus(HttpStatus.CREATED) fun create(@RequestBody request: DataModelRequest) = ApiResponse.success(view(models.create(request.draft())))
     @PutMapping("/{id}") fun update(@PathVariable id: Long, @RequestBody request: DataModelRequest) = ApiResponse.success(view(models.update(id, request.draft())))
-    @DeleteMapping("/{id}") fun delete(@PathVariable id: Long): ApiResponse<Nothing> { models.delete(id); return ApiResponse.success() }
+    @DeleteMapping("/{id}") fun delete(@PathVariable id: Long): ApiResponse<Nothing> {
+        models.get(id)
+        val impacts = dependencies(id, emptySet())
+        if (impacts.isNotEmpty()) throw DataModelValidationException("数据模型仍被 ${impacts.size} 个看板草稿或发布快照使用，不能删除")
+        models.delete(id); return ApiResponse.success()
+    }
     @GetMapping("/{id}/schemas") fun schemas(@PathVariable id: Long) = ApiResponse.success(models.schemas(id).map(::schemaView))
     @PostMapping("/{id}/sync") fun sync(@PathVariable id: Long, @RequestBody(required = false) request: DataModelSyncRequest?) = ApiResponse.success(syncView(models.sync(id, readFields(id, request?.variables ?: emptyMap()))))
     @GetMapping("/{id}/publish-plan") fun publishPlan(@PathVariable id: Long): ApiResponse<Map<String, Any?>> {
@@ -62,6 +69,7 @@ class DataModelController(
     @PostMapping("/{id}/publish") fun publish(@PathVariable id: Long, @RequestBody(required = false) request: DataModelPublishRequest?): ApiResponse<Map<String, Any?>> {
         val plan = models.publishPlan(id)
         if (plan.breakingChanges > 0 && request?.confirmBreaking != true) throw ai.moying.iview.query.DataModelValidationException("发布计划包含 ${plan.breakingChanges} 项破坏性字段变更，必须明确确认后才能发布")
+        if (plan.breakingChanges > 0) dependencies(id, plan.changes.filter { it.breaking }.map { it.field }.toSet())
         return ApiResponse.success(view(models.publish(id, request?.expectedSchemaVersion)))
     }
     @PostMapping("/{id}/rollback") fun rollback(@PathVariable id: Long, @RequestBody request: DataModelRollbackRequest): ApiResponse<Map<String, Any?>> {
@@ -116,10 +124,16 @@ class DataModelController(
     )
 
     private fun dependencies(modelId: Long, changedFields: Set<String>): List<DataModelDashboardImpact> = dashboards.list().mapNotNull { dashboard ->
-        val document = runCatching { objectMapper.readValue(dashboard.contentJson, DashboardDocument::class.java) }.getOrNull()
-        val components = document?.components.orEmpty().filter { component -> component.realtime == null && (component.modelId ?: dashboard.modelId) == modelId }
-        if (dashboard.modelId != modelId && components.isEmpty()) return@mapNotNull null
-        val affected = components.flatMap { it.fields }.filter { it in changedFields }.distinct()
-        DataModelDashboardImpact(dashboard.id, dashboard.name, dashboard.status.name.lowercase(), components.map { it.id }, affected)
+        fun read(source: String, content: String) = try {
+            objectMapper.readValue(content, DashboardDocument::class.java)
+        } catch (_: Exception) {
+            throw DataModelValidationException("看板 ${dashboard.id} 的${if (source == "published") "发布快照" else "草稿"}文档无法解析，不能安全计算模型影响范围")
+        }
+        val versions = mutableListOf(DashboardDependencyVersion("draft", dashboard.modelId, read("draft", dashboard.contentJson)))
+        if (dashboard.publishedSnapshotId != null) {
+            val snapshot = dashboards.published(dashboard.id)
+            versions += DashboardDependencyVersion("published", snapshot.modelId, read("published", snapshot.contentJson))
+        }
+        DashboardModelDependencyAnalyzer.analyze(modelId, changedFields, dashboard, versions)
     }
 }
