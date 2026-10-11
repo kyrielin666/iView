@@ -45,7 +45,11 @@ private class AuthorizationInterceptor(private val identities: IdentityService, 
         return try {
             val user = identities.current(request.getHeader("Authorization"))
             val selfService = request.method == "GET" && request.requestURI in setOf("/api/v1/auth/me", "/api/v1/navigation", "/api/v1/system/parameters")
-            if (!selfService && !identities.permitted(user, request.method, request.requestURI)) throw AuthorizationException("当前用户没有执行此操作的权限")
+            val previewAlias = if (request.method == "POST" && Regex("^/api/v1/data-models/[1-9][0-9]*/heatmap$").matches(request.requestURI))
+                request.requestURI.removeSuffix("/heatmap") + "/preview" else null
+            val permitted = identities.permitted(user, request.method, request.requestURI) ||
+                (previewAlias != null && identities.permitted(user, request.method, previewAlias))
+            if (!selfService && !permitted) throw AuthorizationException("当前用户没有执行此操作的权限")
             request.setAttribute("iview.user", user); true
         } catch (error: AuthenticationException) { fail(response, HttpStatus.UNAUTHORIZED, error.message ?: "未登录") }
         catch (error: AuthorizationException) { fail(response, HttpStatus.FORBIDDEN, error.message ?: "无权限") }

@@ -12,6 +12,8 @@ import ai.moying.iview.query.DataModelRollbackPlan
 import ai.moying.iview.query.DatasetService
 import ai.moying.iview.query.DataModelStatus
 import ai.moying.iview.query.DataModelValidationException
+import ai.moying.iview.query.DataSourceService
+import ai.moying.iview.query.DataSourceType
 import ai.moying.iview.query.DashboardDocument
 import ai.moying.iview.query.DashboardService
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -29,6 +31,12 @@ import org.springframework.web.bind.annotation.RestController
 
 class DataModelRequest { var datasetId: Long? = null; var name: String = ""; var description: String? = null }
 class DataModelPreviewRequest { var variables: Map<String, String> = emptyMap() }
+class DataModelHeatmapRequest {
+    var xField: String = ""
+    var yField: String = ""
+    var valueField: String = ""
+    var variables: Map<String, String> = emptyMap()
+}
 class DataModelSyncRequest { var variables: Map<String, String> = emptyMap() }
 class DataModelPublishRequest { var expectedSchemaVersion: Int? = null; var confirmBreaking = false }
 class DataModelRollbackRequest { var targetSchemaVersion: Int? = null; var expectedPublishedSchemaVersion: Int? = null; var confirmImpact = false }
@@ -47,6 +55,7 @@ class DataModelController(
     private val models: DataModelService,
     private val datasets: DatasetService,
     private val execution: DataSourceExecutionService,
+    private val sources: DataSourceService,
     private val dashboards: DashboardService,
     private val objectMapper: ObjectMapper,
 ) {
@@ -94,6 +103,26 @@ class DataModelController(
         if (missing.isNotEmpty()) throw ai.moying.iview.query.DataModelValidationException("当前数据集缺少已发布模型字段: ${missing.joinToString()}")
         val selected = schema.fields.map { indexes.getValue(it.name) }
         return ApiResponse.success(SqlResult(schema.fields.map { SchemaColumn(it.name, it.type, it.nullable) }, result.rows.map { row -> selected.map(row::getOrNull) }))
+    }
+
+    @PostMapping("/{id}/heatmap") fun heatmap(@PathVariable id: Long, @RequestBody request: DataModelHeatmapRequest): ApiResponse<HeatmapAggregateResult> {
+        val model = models.get(id)
+        if (model.status != DataModelStatus.PUBLISHED) throw DataModelValidationException("只有已发布数据模型可以提供热力图数据")
+        val schema = models.schema(id, requireNotNull(model.publishedSchemaVersion))
+        val dataset = datasets.get(model.datasetId)
+        val isPostgres = sources.credential(dataset.sourceId).type == DataSourceType.POSTGRESQL
+        HeatmapAggregation.validate(schema.fields, request.xField, request.yField, request.valueField, allowTextualMeasure = !isPostgres)
+        val result = if (isPostgres) {
+            val structured = execution.queryStructuredDataset(dataset,
+                HeatmapAggregation.postgresRequest(request.xField, request.yField, request.valueField, request.variables),
+                StructuredDatasetQueryService())
+            HeatmapAggregation.fromStructured(structured, request.valueField)
+        } else {
+            HeatmapAggregation.fromPortable(
+                execution.queryDataset(dataset, StructuredDatasetQueryService.SOURCE_ROW_LIMIT, request.variables),
+                request.xField, request.yField, request.valueField)
+        }
+        return ApiResponse.success(result)
     }
 
     private fun readFields(id: Long, variables: Map<String, String>): List<DataModelField> {

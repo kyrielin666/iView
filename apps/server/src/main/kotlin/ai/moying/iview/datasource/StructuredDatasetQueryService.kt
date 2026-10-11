@@ -65,6 +65,7 @@ class StructuredDatasetQueryService {
         return when (operator) {
             DatasetFilterOperator.IS_NULL -> value == null
             DatasetFilterOperator.IS_NOT_NULL -> value != null
+            DatasetFilterOperator.IS_NOT_BLANK -> value != null && value.toString().isNotBlank()
             DatasetFilterOperator.IN, DatasetFilterOperator.NOT_IN -> {
                 val targets = filter.values.ifEmpty { listOfNotNull(filter.value) }
                 val present = targets.any { equalsValue(value, it) }
@@ -159,6 +160,6 @@ data class StructuredDatasetQueryResult(
 
 enum class DatasetFilterOperator(val wireName: String) {
     EQUALS("equals"), NOT_EQUALS("not_equals"), GREATER_THAN("greater_than"), GREATER_THAN_OR_EQUAL("greater_than_or_equal"),
-    LESS_THAN("less_than"), LESS_THAN_OR_EQUAL("less_than_or_equal"), IN("in"), NOT_IN("not_in"), LIKE("like"), IS_NULL("is_null"), IS_NOT_NULL("is_not_null");
+    LESS_THAN("less_than"), LESS_THAN_OR_EQUAL("less_than_or_equal"), IN("in"), NOT_IN("not_in"), LIKE("like"), IS_NULL("is_null"), IS_NOT_NULL("is_not_null"), IS_NOT_BLANK("is_not_blank");
     companion object { fun from(value: String) = entries.first { it.wireName == value } }
 }

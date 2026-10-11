@@ -35,6 +35,31 @@ class IdentityApiTest {
     @Autowired private lateinit var deviceScope: DeviceScopeGuard
     @Autowired private lateinit var realtimeHub: DeviceRealtimeHub
 
+    @Test fun `model preview permission also authorizes heatmap aggregation without broader write access`() {
+        val login = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content("""{"username":"admin","password":"ChangeMe123!"}"""))
+            .andExpect(status().isOk).andReturn().response.contentAsString
+        val admin = "Bearer ${objectMapper.readTree(login).path("data").path("access_token").asText()}"
+        val suffix = java.util.UUID.randomUUID().toString().take(8)
+        val roleCode = "HEAT${suffix.uppercase()}"
+        val permission = "POST:/api/v1/data-models/*/preview"
+        if (jdbc.queryForObject("SELECT COUNT(*) FROM iview_permission WHERE permission_code=?", Int::class.java, permission) == 0) {
+            mockMvc.perform(post("/api/v1/admin/permissions").header("Authorization", admin).contentType(MediaType.APPLICATION_JSON)
+                .content("""{"code":"$permission","name":"模型预览"}""")).andExpect(status().isCreated)
+        }
+        mockMvc.perform(post("/api/v1/admin/roles").header("Authorization", admin).contentType(MediaType.APPLICATION_JSON)
+            .content("""{"code":"$roleCode","name":"热力图查看","permission_codes":["$permission"]}""")).andExpect(status().isCreated)
+        mockMvc.perform(post("/api/v1/admin/users").header("Authorization", admin).contentType(MediaType.APPLICATION_JSON)
+            .content("""{"username":"heat$suffix","display_name":"热力图查看","password":"HeatViewer123!","role_codes":["$roleCode"]}""")).andExpect(status().isCreated)
+        val viewerLogin = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+            .content("""{"username":"heat$suffix","password":"HeatViewer123!"}""")).andExpect(status().isOk).andReturn().response.contentAsString
+        val viewer = "Bearer ${objectMapper.readTree(viewerLogin).path("data").path("access_token").asText()}"
+        assertTrue(identities.permitted(identities.current(viewer), "POST", "/api/v1/data-models/99999999/preview"))
+        mockMvc.perform(post("/api/v1/data-models/99999999/heatmap").header("Authorization", viewer).contentType(MediaType.APPLICATION_JSON)
+            .content("""{"x_field":"x","y_field":"y","value_field":"v"}""")).andExpect(status().isNotFound)
+        mockMvc.perform(post("/api/v1/data-models/99999999/publish").header("Authorization", viewer).contentType(MediaType.APPLICATION_JSON)
+            .content("{}")) .andExpect(status().isForbidden)
+    }
+
     @Test fun `bootstrap administrator can login refresh logout and read current user`() {
         val login = mockMvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON).content("""{"username":"admin","password":"ChangeMe123!"}"""))
             .andExpect(status().isOk).andExpect(jsonPath("$.data.user.roles[0]").value("ADMIN")).andReturn().response.contentAsString

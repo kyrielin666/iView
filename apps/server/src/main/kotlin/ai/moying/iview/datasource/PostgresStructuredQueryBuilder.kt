@@ -91,6 +91,7 @@ class PostgresStructuredQueryBuilder {
         when (operator) {
             DatasetFilterOperator.IS_NULL -> "$expression IS NULL"
             DatasetFilterOperator.IS_NOT_NULL -> "$expression IS NOT NULL"
+            DatasetFilterOperator.IS_NOT_BLANK -> "NULLIF(BTRIM(CAST($expression AS TEXT)), '') IS NOT NULL"
             DatasetFilterOperator.IN, DatasetFilterOperator.NOT_IN -> {
                 val targets = filter.values.ifEmpty { listOfNotNull(filter.value) }
                 requireRequest(targets.isNotEmpty(), "${filter.operator} 需要 values")

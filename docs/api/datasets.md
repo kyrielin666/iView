@@ -41,7 +41,7 @@
 
 非 PostgreSQL 数据源仍返回来源结构信息。字段元数据未知时不把表达式别名当作物理来源字段。
 
-结构化查询的筛选操作包括 `equals`、`not_equals`、`greater_than`、`greater_than_or_equal`、`less_than`、`less_than_or_equal`、`in`、`not_in`、`like`、`is_null` 和 `is_not_null`。请求字段必须存在于实际结果结构中，最大返回 1,000 行。
+结构化查询的筛选操作包括 `equals`、`not_equals`、`greater_than`、`greater_than_or_equal`、`less_than`、`less_than_or_equal`、`in`、`not_in`、`like`、`is_null`、`is_not_null` 和 `is_not_blank`。最后一种操作会排除空值及转为文本后仅有空白字符的值。请求字段必须存在于实际结果结构中，最大返回 1,000 行。
 
 PostgreSQL 会把投影、筛选、`group by`、`count/sum/avg/min/max`、`having`、排序、分页和总数统计包装在原始只读数据集 SQL 外层并下推执行；因此原始数据集 SQL 可以安全表达多表 `join`，可视化查询层继续在其结果字段白名单上工作。字段名、聚合函数和别名不会直接信任请求文本，值全部使用 JDBC 参数绑定。HTTP、文件和 MongoDB 使用最多 10,000 行的便携内存执行路径，并明确拒绝分组聚合请求，避免返回不完整的聚合结果。
 
