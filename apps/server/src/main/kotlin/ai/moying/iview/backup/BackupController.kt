@@ -17,7 +17,6 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.net.URI
-import java.util.concurrent.TimeUnit
 
 data class BackupFile(val name: String, val size: Long, val sha256: String, val createdAt: Instant, val valid: Boolean, val engine: String)
 class RestoreRequest { var name = ""; var confirmation = "" }
@@ -45,6 +44,7 @@ class BackupService(
     @Value("\${iview.backup.postgres.pg-dump-command:pg_dump}") private val pgDumpCommand: String,
     @Value("\${iview.backup.postgres.pg-restore-command:pg_restore}") private val pgRestoreCommand: String,
     @Value("\${iview.backup.postgres.command-timeout-seconds:1800}") private val postgresTimeoutSeconds: Long,
+    private val commandExecutor: PostgresCommandExecutor,
 ) {
     private val directory: Path = Paths.get(configuredDirectory).toAbsolutePath().normalize()
     private val namePattern = Regex("iview-\\d{8}-\\d{6}-\\d{3}\\.(?:sql|dump)")
@@ -65,7 +65,11 @@ class BackupService(
     }
     fun restore(name: String, confirmation: String) {
         if (!restoreEnabled) throw BackupException("恢复操作默认关闭；请在受控维护窗口设置 IVIEW_BACKUP_RESTORE_ENABLED=true 后重启服务")
-        val source = existing(name); validate(name); if (confirmation != "RESTORE $name") throw BackupException("恢复确认文本不正确")
+        if (confirmation != "RESTORE $name") throw BackupException("恢复确认文本不正确")
+        val source = existing(name)
+        if (source.fileName.toString().endsWith(".dump") != isPostgres()) throw BackupException("备份格式与当前数据库引擎不一致")
+        if (isPostgres() && !postgresEnabled) throw BackupException("PostgreSQL 恢复需要 IVIEW_BACKUP_POSTGRES_ENABLED=true")
+        validate(name)
         if (source.fileName.toString().endsWith(".dump")) restorePostgres(source) else { requireH2(); jdbc.execute("DROP ALL OBJECTS"); jdbc.execute("RUNSCRIPT FROM '${source.toString().replace("'", "''")}'") }
     }
     private fun createPostgres(target: Path) {
@@ -76,7 +80,7 @@ class BackupService(
     private fun restorePostgres(source: Path) {
         if (!postgresEnabled) throw BackupException("PostgreSQL 恢复需要 IVIEW_BACKUP_POSTGRES_ENABLED=true")
         val database = postgresConnection()
-        runPostgres(listOf(pgRestoreCommand, "--clean", "--if-exists", "--no-owner", "--no-privileges", "--host=${database.host}", "--port=${database.port}", "--username=${database.username}", "--dbname=${database.database}", source.toString()), "恢复 PostgreSQL 备份", database.password)
+        runPostgres(listOf(pgRestoreCommand, "--clean", "--if-exists", "--exit-on-error", "--single-transaction", "--no-owner", "--no-privileges", "--host=${database.host}", "--port=${database.port}", "--username=${database.username}", "--dbname=${database.database}", source.toString()), "恢复 PostgreSQL 备份", database.password)
     }
     private fun isPostgres() = jdbcUrl.startsWith("jdbc:postgresql:")
     private fun requireH2() { if (!jdbcUrl.startsWith("jdbc:h2:")) throw BackupException("当前数据库不支持内置 H2 备份；PostgreSQL 请启用受控 pg_dump/pg_restore 作业") }
@@ -95,16 +99,14 @@ class BackupService(
     private fun postgresConnection(): PostgresConnection {
         if (!isPostgres()) throw BackupException("当前数据库不是 PostgreSQL")
         val uri = runCatching { URI(jdbcUrl.removePrefix("jdbc:")) }.getOrElse { throw BackupException("PostgreSQL JDBC 地址无效") }
+        if (uri.rawUserInfo != null || !uri.rawQuery.isNullOrEmpty()) throw BackupException("内置备份暂不支持 JDBC URL 中的凭据或连接参数；请使用匹配 TLS/路由配置的独立运维作业，避免参数被静默忽略")
         val host = uri.host?.takeIf { it.isNotBlank() } ?: throw BackupException("PostgreSQL JDBC 地址缺少主机")
         val database = uri.path.trim('/').takeIf { it.isNotBlank() } ?: throw BackupException("PostgreSQL JDBC 地址缺少数据库名")
+        if ('=' in database || '/' in database || '\u0000' in database) throw BackupException("内置备份不支持该数据库名称")
         return PostgresConnection(host, if (uri.port > 0) uri.port else 5432, database, jdbcUsername, jdbcPassword)
     }
     private fun runPostgres(command: List<String>, action: String, password: String = "") {
         if (postgresTimeoutSeconds !in 1..86_400) throw BackupException("PostgreSQL 备份命令超时必须在 1 到 86400 秒之间")
-        val process = try { ProcessBuilder(command).redirectErrorStream(true).apply { if (password.isNotBlank()) environment()["PGPASSWORD"] = password }.start() } catch (error: Exception) { throw BackupException("$action 无法启动：${error.message}") }
-        val output = StringBuilder(); val reader = Thread { var outputLines = 0; process.inputStream.bufferedReader().useLines { lines -> lines.forEach { line -> if (outputLines++ < 100) output.appendLine(line) } } }.apply { isDaemon = true; start() }
-        if (!process.waitFor(postgresTimeoutSeconds, TimeUnit.SECONDS)) { process.destroyForcibly(); reader.join(1_000); throw BackupException("$action 超时") }
-        reader.join(1_000)
-        if (process.exitValue() != 0) throw BackupException("$action 失败：${output.toString().ifBlank { "命令退出码 ${process.exitValue()}" }.trim()}")
+        commandExecutor.execute(command, action, password, postgresTimeoutSeconds)
     }
 }

@@ -42,6 +42,7 @@ data class DatasetLineageSummary(val outputFields: Int, val sourceFields: Int, v
 data class DatasetLineage(
     val datasetId: Long, val fields: List<DatasetLineageField>, val nodes: List<DatasetLineageNode>, val edges: List<DatasetLineageEdge>,
     val relations: List<SqlLineageRelation>, val summary: DatasetLineageSummary, val note: String,
+    val semantic: SqlSemanticLineage? = null,
 )
 
 @RestController
@@ -82,19 +83,7 @@ class DatasetController(
         val fields = execution.lineage(dataset, request?.variables ?: emptyMap()).map { field ->
             DatasetLineageField(field.outputField, field.sourceCatalog, field.sourceSchema, field.sourceTable, field.sourceField, field.confidence)
         }
-        val relations = execution.lineageRelations(dataset)
-        val outputNodes = fields.map { DatasetLineageNode("output:${it.outputField}", "output", it.outputField) }
-        val sourceNodes = fields.mapNotNull { field -> field.sourceField?.let { source ->
-            val path = listOfNotNull(field.sourceCatalog, field.sourceSchema, field.sourceTable, source).joinToString(".")
-            DatasetLineageNode("source:$path", "source", path)
-        } }.distinctBy { it.id }
-        val edges = fields.mapNotNull { field -> field.sourceField?.let { source ->
-            val path = listOfNotNull(field.sourceCatalog, field.sourceSchema, field.sourceTable, source).joinToString(".")
-            DatasetLineageEdge("source:$path", "output:${field.outputField}", field.confidence)
-        } }
-        val tables = fields.mapNotNull { field -> field.sourceTable?.let { listOfNotNull(field.sourceCatalog, field.sourceSchema, it).joinToString(".") } }.toSet() + relations.filter { it.kind == "BASE_TABLE" }.map { it.name }
-        val summary = DatasetLineageSummary(fields.size, sourceNodes.size, tables.size, fields.count { it.sourceField == null })
-        return ApiResponse.success(DatasetLineage(dataset.id, fields, sourceNodes + outputNodes, edges, relations, summary, "PostgreSQL 优先使用 JDBC 字段元数据；FROM/JOIN 与 CTE 关系仅作启发式辅助审查，表达式字段不伪造成精确字段级血缘。"))
+        return ApiResponse.success(DatasetLineageAssembler.assemble(dataset.id, fields, execution.semanticLineage(dataset, request?.variables ?: emptyMap())))
     }
     @PostMapping("/{id}/explain") fun explain(@PathVariable id: Long, @RequestBody(required = false) request: DatasetVariablesRequest?): ApiResponse<List<String>> {
         val dataset = datasets.get(id)

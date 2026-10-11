@@ -12,7 +12,7 @@
 | `POST /api/v1/datasets/{id}/preview` | 用关联数据源执行受限预览查询；请求体可传 `max_rows`、`variables` |
 | `POST /api/v1/datasets/{id}/query` | 按字段白名单执行投影、筛选、分组聚合、HAVING、排序和分页；请求体传 `fields`、`filters`、`group_by`、`aggregations`、`having`、`order_by`、`limit`、`offset`、`variables` |
 | `POST /api/v1/datasets/{id}/schema` | 读取结果字段结构，不取业务数据；请求体传 `variables` |
-| `POST /api/v1/datasets/{id}/lineage` | 读取字段级 JDBC 元数据血缘及 PostgreSQL `FROM/JOIN`、CTE 关系；请求体传 `variables` |
+| `POST /api/v1/datasets/{id}/lineage` | 读取 JDBC 元数据及 PostgreSQL 静态 SQL 字段依赖、CTE/子查询/UNION 关系；请求体传 `variables` |
 | `POST /api/v1/datasets/{id}/explain` | 读取 PostgreSQL JSON 执行计划；请求体传 `variables` |
 | `POST /api/v1/datasets/{id}/export` | 执行受限 SQL 并下载最多 10,000 行 CSV；请求体传 `variables` |
 
@@ -31,7 +31,15 @@
 
 数据集创建和更新时都会按数据源类型校验查询定义；预览默认 1000 行、最大 10000 行。SQL 中的 `{{变量名}}` 会转为 JDBC 参数；JSON 查询先完成语法解析，再只替换字符串值中的变量，因此变量不能改变请求方法、字段结构或注入查询对象。Explain 仅适用于 PostgreSQL，其他类型返回明确的能力说明。导出统一以最多 10,000 行 CSV 返回。
 
-字段血缘响应包含 `fields`、`nodes`、`edges`、`relations` 和汇总信息。PostgreSQL 的 `relations` 以启发式方式列出识别到的基础表与 CTE，不等于完整 SQL 语法解析；字段级关系优先使用 JDBC 元数据。复杂表达式、跨数据源关联和嵌套 JSON 不会伪造成数据库级精确血缘。
+字段血缘响应保留 `fields`、`nodes`、`edges`、`relations`，新增 PostgreSQL `semantic`：
+
+- `outputs` 按输出列顺序提供 `name`、`expression`、多个 `sources`、`row_sources`、`status` 与 `warnings`。状态为 `RESOLVED`（可解析的静态依赖）、`PARTIAL`、`UNRESOLVED`、`CONSTANT` 或 `DERIVED`。
+- `control_sources` 单独列出筛选、连接条件、分组、排序引用的字段，避免与输出值来源混淆。`COUNT(*)` 等保留表级行依赖，不伪造某一列为来源。
+- AST 解析覆盖普通 SELECT、非递归 CTE、派生表、相关标量子查询、UNION、别名、目录元数据驱动的星号展开及常见表达式。元数据查询使用实际 PostgreSQL `search_path` 和引用标识符规则；变量仍绑定为 JDBC 参数。
+- 字段歧义、目录缺失、递归 CTE、窗口细节、USING/NATURAL 合并列、视图内部、外部表远端来源及用户函数体均可能不完整，必须查看警告；不宣称任意 PostgreSQL SQL 或跨数据源具有完整语义血缘。
+- 图的输出节点按列序号区分，同名输出列不会合并；解析输出与 JDBC 字段数量不一致时返回 `OUTPUT_SCHEMA_MISMATCH`，图退回 JDBC 元数据。
+
+非 PostgreSQL 数据源仍返回来源结构信息。字段元数据未知时不把表达式别名当作物理来源字段。
 
 结构化查询的筛选操作包括 `equals`、`not_equals`、`greater_than`、`greater_than_or_equal`、`less_than`、`less_than_or_equal`、`in`、`not_in`、`like`、`is_null` 和 `is_not_null`。请求字段必须存在于实际结果结构中，最大返回 1,000 行。
 

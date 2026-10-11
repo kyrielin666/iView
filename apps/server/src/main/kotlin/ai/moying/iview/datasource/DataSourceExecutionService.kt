@@ -188,13 +188,15 @@ class DataSourceExecutionService(
         }
         return postgres(credential) { connection ->
             val bound = DatasetSql.bindVariables(DatasetSql.schemaQuery(dataset.sql), variables)
+            connection.isReadOnly = true
             connection.prepareStatement(bound.sql).use { statement ->
+                statement.queryTimeout = 30
                 bind(statement, bound.values)
                 statement.executeQuery().use { rs ->
                     val meta = rs.metaData
                     (1..meta.columnCount).map { index ->
                         val table = meta.getTableName(index).takeIf { !it.isNullOrBlank() }
-                        val field = meta.getColumnName(index).takeIf { !it.isNullOrBlank() }
+                        val field = meta.getColumnName(index).takeIf { table != null && !it.isNullOrBlank() }
                         ExecutedLineageField(meta.getColumnLabel(index), meta.getCatalogName(index).takeIf { !it.isNullOrBlank() }, meta.getSchemaName(index).takeIf { !it.isNullOrBlank() }, table, field, if (table != null && field != null) "JDBC_METADATA" else "DERIVED_OR_DRIVER_UNAVAILABLE")
                     }
                 }
@@ -204,6 +206,18 @@ class DataSourceExecutionService(
 
     fun lineageRelations(dataset: Dataset): List<SqlLineageRelation> =
         if (sources.credential(dataset.sourceId).type == DataSourceType.POSTGRESQL) SqlLineageAnalyzer.relations(dataset.sql) else emptyList()
+
+    fun semanticLineage(dataset: Dataset, variables: Map<String, String>): SqlSemanticLineage? {
+        val credential = sources.credential(dataset.sourceId)
+        if (credential.type != DataSourceType.POSTGRESQL) return null
+        val bound = DatasetSql.bindVariables(SafeSql.selectOnly(dataset.sql), variables)
+        return postgres(credential) { connection ->
+            connection.isReadOnly = true
+            val catalog = PostgresLineageCatalog(connection)
+            val result = SqlSemanticLineageAnalyzer.analyze(bound.sql, catalog::resolve)
+            result.copy(warnings = (result.warnings + catalog.warnings).distinct())
+        }
+    }
 
     private fun mongoQuery(credential: DataSourceCredential, config: JsonNode, maxRows: Int): SqlResult = mongo(credential, config) { client, connection ->
         val database = text(config, "database") ?: connection.database ?: throw DatasetValidationException("MongoDB 查询定义缺少 database")
